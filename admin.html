@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
+  <link rel="manifest" href="/manifest.json" />
+  <title>Admin · G&T Chickens Goods In</title>
+  <link rel="stylesheet" href="/assets/style.css" />
+</head>
+<body>
+  <header class="brandbar">
+    <div class="brand">
+      <img class="brand-mark" src="/assets/brand-mark.png" alt="G&amp;T Chickens" width="48" height="48" />
+      <div class="brand-text">
+        <div class="brand-name">G&amp;T CHICKENS</div>
+        <div class="brand-tag">Goods in · admin</div>
+      </div>
+    </div>
+    <nav class="brand-nav">
+      <span id="netstatus" class="pill online">online</span>
+      <a href="/receive" class="navlink">Receive</a>
+      <a href="/history" class="navlink">History</a>
+    </nav>
+  </header>
+
+  <main class="page">
+    <!-- PIN gate -->
+    <section id="gate" class="block">
+      <h1>Admin</h1>
+      <p class="fieldhint">Enter the admin PIN to manage suppliers, products, barcodes and receipts.</p>
+      <div class="searchbar">
+        <input type="password" id="pin" inputmode="numeric" placeholder="Admin PIN" autocomplete="off" />
+        <button type="button" id="pinbtn">Unlock</button>
+      </div>
+      <div id="gate-result" class="result" hidden></div>
+    </section>
+
+    <div id="adminarea" hidden>
+      <!-- Export -->
+      <section class="exportbar">
+        <select id="period" style="margin-right:8px">
+          <option value="7">Last 7 days</option>
+          <option value="30" selected>Last 30 days</option>
+          <option value="90">Last 90 days</option>
+          <option value="365">Last 12 months</option>
+        </select>
+        <button type="button" id="exportbtn">Export CSV</button>
+      </section>
+
+      <!-- Suppliers -->
+      <section class="block">
+        <h2>Suppliers</h2>
+        <div class="adminform">
+          <input type="text" id="sup-name" placeholder="Supplier name" />
+          <input type="text" id="sup-code" placeholder="Code (optional)" />
+          <button type="button" id="sup-add">Add / update supplier</button>
+        </div>
+        <table class="rolltable" style="margin-top:12px">
+          <thead><tr><th>Name</th><th>Code</th><th>Status</th><th></th></tr></thead>
+          <tbody id="sup-body"></tbody>
+        </table>
+      </section>
+
+      <!-- Products -->
+      <section class="block">
+        <h2>Product master</h2>
+        <div class="adminform">
+          <input type="text" id="prod-name" placeholder="Product name" />
+          <input type="text" id="prod-aliases" placeholder="Aliases (semicolon-separated)" />
+          <input type="text" id="prod-unit" placeholder="Default unit (kg, carton…)" />
+          <button type="button" id="prod-add">Add / update product</button>
+        </div>
+        <table class="rolltable" style="margin-top:12px">
+          <thead><tr><th>Name</th><th>Aliases</th><th>Unit</th><th></th></tr></thead>
+          <tbody id="prod-body"></tbody>
+        </table>
+      </section>
+
+      <!-- Barcodes -->
+      <section class="block">
+        <h2>Barcode mappings <span class="optional">(learned from scans)</span></h2>
+        <div class="adminform">
+          <input type="text" id="bc-code" placeholder="Barcode" />
+          <input type="text" id="bc-product" placeholder="Maps to product" />
+          <input type="text" id="bc-supplier" placeholder="Supplier (optional)" />
+          <button type="button" id="bc-add">Add / update mapping</button>
+        </div>
+        <table class="rolltable" style="margin-top:12px">
+          <thead><tr><th>Barcode</th><th>Product</th><th>Supplier</th><th></th></tr></thead>
+          <tbody id="bc-body"></tbody>
+        </table>
+      </section>
+
+      <!-- Recent receipts -->
+      <section class="block">
+        <h2>Recent receipts</h2>
+        <div class="matrix-wrap">
+          <table class="rolltable">
+            <thead><tr><th>Received</th><th>Product</th><th>Supplier</th><th>Qty</th><th>Weight</th><th>Batch #</th><th>Use-by</th><th></th></tr></thead>
+            <tbody id="rec-body"></tbody>
+          </table>
+        </div>
+      </section>
+      <div id="admin-result" class="result" hidden></div>
+    </div>
+  </main>
+
+  <footer class="brandfoot">
+    G&amp;T Chickens Pty Ltd · Since 1983 · PrimeSafe Licence P01491
+  </footer>
+
+  <script src="/assets/admin.js"></script>
+</body>
+</html>

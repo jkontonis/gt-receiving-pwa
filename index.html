@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
+  <link rel="manifest" href="/manifest.json" />
+  <title>Goods In · G&T Chickens</title>
+  <link rel="stylesheet" href="/assets/style.css" />
+</head>
+<body>
+  <header class="brandbar">
+    <div class="brand">
+      <img class="brand-mark" src="/assets/brand-mark.png" alt="G&amp;T Chickens" width="48" height="48" />
+      <div class="brand-text">
+        <div class="brand-name">G&amp;T CHICKENS</div>
+        <div class="brand-tag">Goods in · receiving</div>
+      </div>
+    </div>
+    <nav class="brand-nav">
+      <span id="netstatus" class="pill online">online</span>
+      <span id="pending" class="pill" hidden>0 queued</span>
+      <a href="/history" class="navlink">History</a>
+      <a href="/admin" class="navlink">Admin</a>
+    </nav>
+  </header>
+
+  <main class="page">
+    <section class="pagehead">
+      <h1>Receive a delivery</h1>
+      <div class="autotime">
+        <span class="autotime-label">Auto-stamped</span>
+        <span class="autotime-value" id="autotime">—</span>
+      </div>
+    </section>
+
+    <form id="receiveform">
+      <section class="block">
+        <label>Scan the supplier barcode</label>
+        <div class="scanner" id="scanner">
+          <video id="scan-video" playsinline muted hidden></video>
+          <div class="scan-overlay" id="scan-overlay" hidden><div class="scan-reticle"></div></div>
+        </div>
+        <div class="scanrow">
+          <button type="button" class="scanbtn" id="scanbtn">Scan with camera</button>
+          <button type="button" class="scanbtn secondary" id="scanstop" hidden>Stop camera</button>
+        </div>
+        <input type="text" id="barcode" autocomplete="off" inputmode="text" placeholder="…or type / use a handheld scanner, then Enter" />
+        <small class="fieldhint" id="scanhint">Point the tablet camera at the barcode. A handheld USB/Bluetooth scanner also works — it types into the box above.</small>
+      </section>
+
+      <section class="block">
+        <label>Supplier</label>
+        <select id="supplier" required>
+          <option value="">— select supplier —</option>
+        </select>
+      </section>
+
+      <section class="block">
+        <label>Product</label>
+        <input type="text" id="product" autocomplete="off" list="products" required />
+        <datalist id="products"></datalist>
+        <small class="fieldhint">Auto-fills from a known barcode. New barcode? Pick/type the product and it'll be remembered next time.</small>
+      </section>
+
+      <section class="block">
+        <label>Quantity received</label>
+        <div class="qtyrow">
+          <input type="number" id="quantity" autocomplete="off" inputmode="decimal" min="0" step="any" placeholder="e.g. 12" />
+          <select id="unit">
+            <option value="carton">cartons</option>
+            <option value="crate">crates</option>
+            <option value="tray">trays</option>
+            <option value="bag">bags</option>
+            <option value="unit">units</option>
+            <option value="kg">kg</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="block">
+        <label>Total weight (kg) <span class="optional">(catch-weight)</span></label>
+        <input type="number" id="weight_kg" autocomplete="off" inputmode="decimal" min="0" step="any" placeholder="e.g. 138.6" />
+      </section>
+
+      <section class="block">
+        <label>Batch / lot number</label>
+        <input type="text" id="batch_number" autocomplete="off" placeholder="From the supplier carton label" />
+      </section>
+
+      <section class="block">
+        <label>Use-by date</label>
+        <input type="date" id="use_by" autocomplete="off" />
+      </section>
+
+      <section class="block">
+        <label>Notes <span class="optional">(optional)</span></label>
+        <textarea id="notes" rows="2" autocomplete="off" placeholder="Temperature, damage, short delivery…"></textarea>
+      </section>
+
+      <section class="block">
+        <label>Photo <span class="optional">(optional — carton label / delivery docket)</span></label>
+        <div class="photoblock">
+          <label for="photofile" class="photobtn" id="photobtn-label">
+            <span class="photobtn-text">Take / choose photo</span>
+          </label>
+          <input type="file" id="photofile" accept="image/*" hidden />
+          <div class="photo-preview" id="photo-preview" hidden>
+            <img id="photo-thumb" alt="preview" />
+            <button type="button" class="photo-remove" id="photo-remove">Remove</button>
+          </div>
+        </div>
+        <input type="hidden" id="photo_data" />
+      </section>
+
+      <button type="submit" class="submit-btn" id="submitbtn">RECEIVE IN</button>
+      <div id="result" class="result" hidden></div>
+    </form>
+  </main>
+
+  <footer class="brandfoot">
+    G&amp;T Chickens Pty Ltd · Since 1983 · PrimeSafe Licence P01491
+  </footer>
+
+  <script src="/assets/vendor/zxing-0.21.3.min.js"></script>
+  <script src="/assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
+  <link rel="manifest" href="/manifest.json" />
+  <title>Receiving history · G&T Chickens</title>
+  <link rel="stylesheet" href="/assets/style.css" />
+</head>
+<body>
+  <header class="brandbar">
+    <div class="brand">
+      <img class="brand-mark" src="/assets/brand-mark.png" alt="G&amp;T Chickens" width="48" height="48" />
+      <div class="brand-text">
+        <div class="brand-name">G&amp;T CHICKENS</div>
+        <div class="brand-tag">Goods in · history</div>
+      </div>
+    </div>
+    <nav class="brand-nav">
+      <span id="netstatus" class="pill online">online</span>
+      <select id="period">
+        <option value="7">Last 7 days</option>
+        <option value="14" selected>Last 14 days</option>
+        <option value="30">Last 30 days</option>
+        <option value="90">Last 90 days</option>
+        <option value="365">Last 12 months</option>
+      </select>
+      <a href="/receive" class="navlink">Receive</a>
+      <a href="/admin" class="navlink">Admin</a>
+    </nav>
+  </header>
+
+  <main class="page">
+    <section class="pagehead">
+      <h1>Receiving history</h1>
+    </section>
+
+    <div class="searchbar">
+      <input type="text" id="search" placeholder="Search batch #, product, supplier or barcode…" autocomplete="off" />
+      <button type="button" id="searchbtn">Search</button>
+    </div>
+
+    <div class="headline">
+      <div class="kpi"><div class="kpi-label">Deliveries</div><div class="kpi-value" id="kpi-count">—</div></div>
+      <div class="kpi"><div class="kpi-label">Total weight (kg)</div><div class="kpi-value" id="kpi-weight">—</div></div>
+      <div class="kpi"><div class="kpi-label">Suppliers</div><div class="kpi-value small" id="kpi-suppliers">—</div></div>
+      <div class="kpi"><div class="kpi-label">Expiring ≤3 days</div><div class="kpi-value" id="kpi-expiring">—</div></div>
+    </div>
+
+    <div class="matrix-wrap">
+      <table class="rolltable" id="receipts-table">
+        <thead>
+          <tr>
+            <th>Received</th><th>Product</th><th>Supplier</th><th>Qty</th>
+            <th>Weight</th><th>Batch #</th><th>Use-by</th><th>Photo</th>
+          </tr>
+        </thead>
+        <tbody id="receipts-body"><tr><td colspan="8">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </main>
+
+  <div class="lightbox" id="lightbox" hidden>
+    <button class="lightbox-close" id="lightbox-close">&times;</button>
+    <img id="lightbox-img" alt="receipt photo" />
+  </div>
+
+  <footer class="brandfoot">
+    G&amp;T Chickens Pty Ltd · Since 1983 · PrimeSafe Licence P01491
+  </footer>
+
+  <script src="/assets/history.js"></script>
+</body>
+</html>

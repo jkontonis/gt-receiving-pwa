@@ -1,0 +1,12 @@
+{
+  "name": "gt-receiving-pwa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "G&T Chickens goods-in receiving + batch tracking — PWA on Vercel",
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.4"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
