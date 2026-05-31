@@ -4,20 +4,19 @@
 --
 -- It wipes the genealogy tables (lots + process events/links) but LEAVES the
 -- reference data intact (suppliers, products, learned barcodes). Safe to run on
--- an empty DB too. Order matters: children before parents because of the FKs.
+-- an empty DB too.
+--
+-- NOTE: the Neon SQL editor does NOT allow BEGIN/COMMIT (transaction control),
+-- so there's no transaction wrapper here. Run the statements top to bottom; a
+-- single TRUNCATE ... CASCADE is atomic on its own. One TRUNCATE across all
+-- four tables avoids any FK ordering issues.
 -- ============================================================================
 
-BEGIN;
-
--- process_inputs / process_outputs reference both process_events and lots, so
--- they go first. TRUNCATE ... CASCADE also clears anything pointing at them.
-TRUNCATE TABLE process_outputs, process_inputs, process_events RESTART IDENTITY CASCADE;
-
--- Now the lots themselves (RESTART IDENTITY so the first real lot is id 1 again,
--- giving a clean GT-YYMMDD-001 lot code).
-TRUNCATE TABLE lots RESTART IDENTITY CASCADE;
-
-COMMIT;
+-- Clear lots + all process events/links in one shot. CASCADE follows the FKs
+-- from lots into process_inputs/process_outputs; listing process_events too
+-- makes sure the events themselves go. RESTART IDENTITY resets the id counters
+-- so the first real lot is id 1 again (clean GT-YYMMDD-001 lot code).
+TRUNCATE TABLE lots, process_events, process_inputs, process_outputs RESTART IDENTITY CASCADE;
 
 -- OPTIONAL: if you also booked test deliveries through the old receipts flow and
 -- want those gone, uncomment the next line:
