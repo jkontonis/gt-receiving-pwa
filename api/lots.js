@@ -19,12 +19,9 @@ function strOrNull(v) {
   return s === '' ? null : s;
 }
 
-// Columns returned to the client. Deliberately EXCLUDES the (large, base64)
-// photo so lists and single-lot responses stay light — a flag is enough; the
-// actual image is fetched on demand via /api/photo?lot=ID.
-const LOT_COLS = `id, lot_code, product, origin, status, supplier, supplier_batch,
-  kill_date, production_date, use_by, quantity, unit, weight_kg, container,
-  receipt_id, notes, created_at, (photo IS NOT NULL) AS has_photo`;
+// NOTE on returned columns: list/single responses deliberately SELECT explicit
+// columns and EXCLUDE the (large, base64) photo so payloads stay light — a
+// has_photo flag is enough; the image is fetched on demand via /api/photo?lot=ID.
 
 export default async function handler(req, res) {
   try {
