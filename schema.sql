@@ -90,11 +90,14 @@ CREATE TABLE IF NOT EXISTS lots (
   container       TEXT,
   receipt_id      INT,
   notes           TEXT,
+  photo           TEXT,                              -- docket photo (received lots), base64 data URL
+  client_id       TEXT,                              -- offline replay de-dupe key
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_lots_product ON lots(product);
 CREATE INDEX IF NOT EXISTS idx_lots_status ON lots(status);
 CREATE INDEX IF NOT EXISTS idx_lots_supplier ON lots(supplier);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_lots_client_id ON lots(client_id) WHERE client_id IS NOT NULL;
 
 -- A process event consumes input lots and produces output lots. The link is the genealogy edge.
 CREATE TABLE IF NOT EXISTS process_events (

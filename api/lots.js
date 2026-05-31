@@ -45,26 +45,68 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Enter a quantity or a weight.' });
       }
 
+      let photo = strOrNull(b.photo);
+      if (photo && photo.length > 600 * 1024) {
+        return res.status(413).json({ error: 'Photo too large — please retake.' });
+      }
+
+      // Offline replay de-dupe: if this client_id already booked a lot, return it
+      // unchanged rather than creating a duplicate (the app retries queued lots).
+      const clientId = strOrNull(b.client_id);
+      if (clientId) {
+        const dup = await sql`
+          SELECT id, lot_code, product, origin, status, supplier, supplier_batch,
+                 kill_date, production_date, use_by, quantity, unit, weight_kg,
+                 container, receipt_id, notes, created_at, (photo IS NOT NULL) AS has_photo
+          FROM lots WHERE client_id = ${clientId}`;
+        if (dup.length > 0) return res.status(200).json({ lot: dup[0], duplicate: true });
+      }
+
       // Make sure the product exists (so later processing knows its shelf life).
       await sql`INSERT INTO products (canonical_name, unit, kind)
                 VALUES (${product}, ${strOrNull(b.unit)}, 'raw')
                 ON CONFLICT (canonical_name) DO NOTHING`;
+
+      // GTIN / barcode learning. The app looks products up by GTIN (falling back
+      // to the raw scanned code), so learn the mapping under that same key, and
+      // stamp the product's gtin column so the *cached* product list can match
+      // offline next time (no network round-trip needed).
+      const gtin = strOrNull(b.gtin);
+      const rawBarcode = strOrNull(b.barcode);
+      const lookupKey = gtin || rawBarcode;
+      if (lookupKey) {
+        await sql`INSERT INTO product_barcodes (barcode, product, supplier, unit)
+                  VALUES (${lookupKey}, ${product}, ${strOrNull(b.supplier)}, ${strOrNull(b.unit)})
+                  ON CONFLICT (barcode) DO UPDATE SET
+                    product = EXCLUDED.product,
+                    supplier = COALESCE(EXCLUDED.supplier, product_barcodes.supplier),
+                    unit = COALESCE(EXCLUDED.unit, product_barcodes.unit)`;
+      }
+      if (gtin) {
+        await sql`UPDATE products SET gtin = ${gtin}
+                  WHERE canonical_name = ${product} AND (gtin IS NULL OR gtin = '')`;
+      }
 
       const status = strOrNull(b.status) || 'available';
       const inserted = await sql`
         INSERT INTO lots
           (lot_code, product, origin, status, supplier, supplier_batch,
            kill_date, production_date, use_by, quantity, unit, weight_kg,
-           container, receipt_id, notes)
+           container, receipt_id, notes, photo, client_id)
         VALUES
           ('PENDING', ${product}, 'received', ${status}, ${strOrNull(b.supplier)},
            ${strOrNull(b.supplier_batch)}, ${strOrNull(b.kill_date)}, ${productionDate},
            ${strOrNull(b.use_by)}, ${qty}, ${strOrNull(b.unit)}, ${weight},
-           ${strOrNull(b.container)}, ${numOrNull(b.receipt_id)}, ${strOrNull(b.notes)})
-        RETURNING *`;
-      const lot = inserted[0];
-      const code = strOrNull(b.lot_code) || lotCodeFor(productionDate, lot.id);
-      const updated = await sql`UPDATE lots SET lot_code = ${code} WHERE id = ${lot.id} RETURNING *`;
+           ${strOrNull(b.container)}, ${numOrNull(b.receipt_id)}, ${strOrNull(b.notes)},
+           ${photo}, ${clientId})
+        RETURNING id`;
+      const newId = inserted[0].id;
+      const code = strOrNull(b.lot_code) || lotCodeFor(productionDate, newId);
+      const updated = await sql`
+        UPDATE lots SET lot_code = ${code} WHERE id = ${newId}
+        RETURNING id, lot_code, product, origin, status, supplier, supplier_batch,
+                  kill_date, production_date, use_by, quantity, unit, weight_kg,
+                  container, receipt_id, notes, created_at, (photo IS NOT NULL) AS has_photo`;
       return res.status(201).json({ lot: updated[0] });
     }
 
@@ -75,7 +117,11 @@ export default async function handler(req, res) {
       const { id, status, product, origin, q, days } = req.query;
 
       if (id) {
-        const rows = await sql`SELECT * FROM lots WHERE id = ${Number(id)}`;
+        const rows = await sql`
+          SELECT id, lot_code, product, origin, status, supplier, supplier_batch,
+                 kill_date, production_date, use_by, quantity, unit, weight_kg,
+                 container, receipt_id, notes, created_at, (photo IS NOT NULL) AS has_photo
+          FROM lots WHERE id = ${Number(id)}`;
         if (rows.length === 0) return res.status(404).json({ error: 'Lot not found' });
         return res.status(200).json({ lot: rows[0] });
       }
@@ -87,7 +133,10 @@ export default async function handler(req, res) {
       const pr = product || null;
       const og = origin || null;
       const rows = await sql`
-        SELECT * FROM lots
+        SELECT id, lot_code, product, origin, status, supplier, supplier_batch,
+               kill_date, production_date, use_by, quantity, unit, weight_kg,
+               container, receipt_id, notes, created_at, (photo IS NOT NULL) AS has_photo
+        FROM lots
         WHERE created_at >= ${since}
           AND (${st}::text IS NULL OR status = ${st})
           AND (${pr}::text IS NULL OR product = ${pr})
