@@ -99,9 +99,15 @@ export async function ensureSchema() {
     notes           TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`;
+  // Docket photo (received lots) + offline de-dupe key. ADD COLUMN IF NOT EXISTS
+  // keeps this safe to run on every cold start. client_id lets the app replay a
+  // queued lot after coming back online without creating a duplicate.
+  await sql`ALTER TABLE lots ADD COLUMN IF NOT EXISTS photo TEXT`;
+  await sql`ALTER TABLE lots ADD COLUMN IF NOT EXISTS client_id TEXT`;
   await sql`CREATE INDEX IF NOT EXISTS idx_lots_product ON lots(product)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_lots_status ON lots(status)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_lots_supplier ON lots(supplier)`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_lots_client_id ON lots(client_id) WHERE client_id IS NOT NULL`;
 
   // A process event consumes one or more input lots and produces one or more
   // output lots. The input<->output link IS the genealogy edge. A crumbed
