@@ -61,3 +61,65 @@ INSERT INTO products (canonical_name, aliases, unit) VALUES
   ('Chicken Thigh Fillet',  'Thigh; BST; Boneless Thigh',  'kg'),
   ('Whole Chicken Size 16', 'Size 16; 1.6kg bird',         'carton')
 ON CONFLICT (canonical_name) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- Lot genealogy / internal labelling (boning-room traceability).
+-- ---------------------------------------------------------------------------
+
+-- Product attributes for the processing room.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'raw';            -- 'raw' | 'processed' | 'ingredient'
+ALTER TABLE products ADD COLUMN IF NOT EXISTS shelf_life_days INT NOT NULL DEFAULT 7;      -- days allowed after bone-out (capped at source UBD)
+ALTER TABLE products ADD COLUMN IF NOT EXISTS gtin TEXT;                                    -- GS1 GTIN off the supplier label
+ALTER TABLE products ADD COLUMN IF NOT EXISTS units_per_carton INT;                        -- pack profile (piece counts)
+
+-- Every quantity of stock is a lot: received from a supplier, or produced internally.
+CREATE TABLE IF NOT EXISTS lots (
+  id              SERIAL PRIMARY KEY,
+  lot_code        TEXT UNIQUE NOT NULL,
+  product         TEXT NOT NULL,
+  origin          TEXT NOT NULL DEFAULT 'received',  -- 'received' | 'produced'
+  status          TEXT NOT NULL DEFAULT 'available', -- 'wip' | 'available' | 'consumed' | 'shipped'
+  supplier        TEXT,
+  supplier_batch  TEXT,
+  kill_date       DATE,
+  production_date DATE,
+  use_by          DATE,
+  quantity        NUMERIC,
+  unit            TEXT,
+  weight_kg       NUMERIC,
+  container       TEXT,
+  receipt_id      INT,
+  notes           TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_lots_product ON lots(product);
+CREATE INDEX IF NOT EXISTS idx_lots_status ON lots(status);
+CREATE INDEX IF NOT EXISTS idx_lots_supplier ON lots(supplier);
+
+-- A process event consumes input lots and produces output lots. The link is the genealogy edge.
+CREATE TABLE IF NOT EXISTS process_events (
+  id           SERIAL PRIMARY KEY,
+  event_type   TEXT NOT NULL,        -- 'bone_out' | 'portion' | 'slice' | 'crumb' | ...
+  process_date DATE NOT NULL,
+  operator     TEXT,
+  notes        TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS process_inputs (
+  id        SERIAL PRIMARY KEY,
+  event_id  INT NOT NULL REFERENCES process_events(id) ON DELETE CASCADE,
+  lot_id    INT NOT NULL REFERENCES lots(id),
+  weight_kg NUMERIC,
+  quantity  NUMERIC
+);
+CREATE INDEX IF NOT EXISTS idx_process_inputs_event ON process_inputs(event_id);
+CREATE INDEX IF NOT EXISTS idx_process_inputs_lot ON process_inputs(lot_id);
+
+CREATE TABLE IF NOT EXISTS process_outputs (
+  id       SERIAL PRIMARY KEY,
+  event_id INT NOT NULL REFERENCES process_events(id) ON DELETE CASCADE,
+  lot_id   INT NOT NULL REFERENCES lots(id)
+);
+CREATE INDEX IF NOT EXISTS idx_process_outputs_event ON process_outputs(event_id);
+CREATE INDEX IF NOT EXISTS idx_process_outputs_lot ON process_outputs(lot_id);

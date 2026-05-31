@@ -61,6 +61,78 @@ export async function ensureSchema() {
   await sql`CREATE INDEX IF NOT EXISTS idx_receipts_supplier ON receipts(supplier)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_receipts_product ON receipts(product)`;
 
+  // ---------------------------------------------------------------------------
+  // Lot genealogy / internal labelling (the boning-room traceability model).
+  // ---------------------------------------------------------------------------
+
+  // Extend products with the attributes the processing room needs. ADD COLUMN
+  // IF NOT EXISTS is idempotent, so this is safe to run on every cold start.
+  //  - kind:             'raw' (whole bird), 'processed' (a cut/portion we make),
+  //                      or 'ingredient' (crumb/batter — carries its own batch).
+  //  - shelf_life_days:  days we allow after bone-out, capped at the source UBD.
+  //  - gtin:             GS1 GTIN from the supplier label (for scan auto-match).
+  //  - units_per_carton: pack profile to derive piece counts (never scan birds).
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'raw'`;
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS shelf_life_days INT NOT NULL DEFAULT 7`;
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS gtin TEXT`;
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS units_per_carton INT`;
+
+  // Every physical quantity of stock is a LOT — either RECEIVED from a supplier
+  // (incoming WIP) or PRODUCED internally by a process event. Produced lots carry
+  // a use-by date down from their source (never reset fresh).
+  await sql`CREATE TABLE IF NOT EXISTS lots (
+    id              SERIAL PRIMARY KEY,
+    lot_code        TEXT UNIQUE NOT NULL,
+    product         TEXT NOT NULL,
+    origin          TEXT NOT NULL DEFAULT 'received',  -- 'received' | 'produced'
+    status          TEXT NOT NULL DEFAULT 'available', -- 'wip' | 'available' | 'consumed' | 'shipped'
+    supplier        TEXT,                              -- received lots
+    supplier_batch  TEXT,                              -- supplier's own lot/batch off their label
+    kill_date       DATE,                              -- supplier kill/slaughter date (received)
+    production_date DATE,                              -- received date, or bone-out date (produced)
+    use_by          DATE,                              -- UBD; carried down on produced lots
+    quantity        NUMERIC,
+    unit            TEXT,
+    weight_kg       NUMERIC,
+    container       TEXT,                              -- e.g. 'FB4 bin'
+    receipt_id      INT,                               -- optional link to the receipts row
+    notes           TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_lots_product ON lots(product)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_lots_status ON lots(status)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_lots_supplier ON lots(supplier)`;
+
+  // A process event consumes one or more input lots and produces one or more
+  // output lots. The input<->output link IS the genealogy edge. A crumbed
+  // schnitzel therefore has TWO parents (sliced breast lot + crumb lot).
+  await sql`CREATE TABLE IF NOT EXISTS process_events (
+    id            SERIAL PRIMARY KEY,
+    event_type    TEXT NOT NULL,            -- 'bone_out' | 'portion' | 'slice' | 'crumb' | ...
+    process_date  DATE NOT NULL,
+    operator      TEXT,
+    notes         TEXT,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`;
+
+  await sql`CREATE TABLE IF NOT EXISTS process_inputs (
+    id          SERIAL PRIMARY KEY,
+    event_id    INT NOT NULL REFERENCES process_events(id) ON DELETE CASCADE,
+    lot_id      INT NOT NULL REFERENCES lots(id),
+    weight_kg   NUMERIC,
+    quantity    NUMERIC
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_process_inputs_event ON process_inputs(event_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_process_inputs_lot ON process_inputs(lot_id)`;
+
+  await sql`CREATE TABLE IF NOT EXISTS process_outputs (
+    id          SERIAL PRIMARY KEY,
+    event_id    INT NOT NULL REFERENCES process_events(id) ON DELETE CASCADE,
+    lot_id      INT NOT NULL REFERENCES lots(id)
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_process_outputs_event ON process_outputs(event_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_process_outputs_lot ON process_outputs(lot_id)`;
+
   const existing = await sql`SELECT COUNT(*)::int AS n FROM suppliers`;
   if (existing[0].n === 0) {
     await sql`INSERT INTO suppliers (name, code, status) VALUES
@@ -75,4 +147,30 @@ export async function ensureSchema() {
       ('Whole Chicken Size 16',   'Size 16; 1.6kg bird',            'carton', NULL)`;
   }
   inited = true;
+}
+
+// Generate a unique internal lot code: GT-YYMMDD-NNN (date = production/received).
+// We derive the numeric suffix from the row id after insert so it's collision-free
+// and human-traceable on a printed label.
+export function lotCodeFor(dateStr, id) {
+  const d = dateStr ? new Date(dateStr) : new Date();
+  const yy = String(d.getUTCFullYear()).slice(2);
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  return `GT-${yy}${mm}${dd}-${String(id).padStart(3, '0')}`;
+}
+
+// Pick the earliest (most conservative) use-by from a set of date strings.
+export function minDate(dates) {
+  const valid = dates.filter(Boolean).map((d) => new Date(d)).filter((d) => !isNaN(d));
+  if (valid.length === 0) return null;
+  return new Date(Math.min(...valid.map((d) => d.getTime())));
+}
+
+// Format a Date as YYYY-MM-DD (UTC) for a DATE column.
+export function isoDate(d) {
+  if (!d) return null;
+  const dt = d instanceof Date ? d : new Date(d);
+  if (isNaN(dt)) return null;
+  return dt.toISOString().slice(0, 10);
 }

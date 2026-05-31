@@ -12,7 +12,8 @@ export default async function handler(req, res) {
   try {
     await ensureSchema();
     if (req.method === 'GET') {
-      const r = await sql`SELECT canonical_name, aliases, unit, default_supplier
+      const r = await sql`SELECT canonical_name, aliases, unit, default_supplier,
+        kind, shelf_life_days, gtin, units_per_carton
         FROM products ORDER BY canonical_name`;
       return res.status(200).json({ products: r });
     }
@@ -21,12 +22,19 @@ export default async function handler(req, res) {
       const b = req.body || {};
       if (!b.canonical_name) return res.status(400).json({ error: 'canonical_name is required' });
       const r = await sql`
-        INSERT INTO products (canonical_name, aliases, unit, default_supplier)
-        VALUES (${b.canonical_name}, ${b.aliases || null}, ${b.unit || null}, ${b.default_supplier || null})
+        INSERT INTO products (canonical_name, aliases, unit, default_supplier,
+          kind, shelf_life_days, gtin, units_per_carton)
+        VALUES (${b.canonical_name}, ${b.aliases || null}, ${b.unit || null}, ${b.default_supplier || null},
+          ${b.kind || 'raw'}, ${b.shelf_life_days != null ? Number(b.shelf_life_days) : 7},
+          ${b.gtin || null}, ${b.units_per_carton != null ? Number(b.units_per_carton) : null})
         ON CONFLICT (canonical_name) DO UPDATE SET
           aliases = EXCLUDED.aliases,
           unit = EXCLUDED.unit,
-          default_supplier = EXCLUDED.default_supplier
+          default_supplier = EXCLUDED.default_supplier,
+          kind = EXCLUDED.kind,
+          shelf_life_days = EXCLUDED.shelf_life_days,
+          gtin = EXCLUDED.gtin,
+          units_per_carton = EXCLUDED.units_per_carton
         RETURNING canonical_name`;
       return res.status(201).json({ ok: true, canonical_name: r[0].canonical_name });
     }
@@ -46,7 +54,11 @@ export default async function handler(req, res) {
         canonical_name = COALESCE(${newName}, canonical_name),
         aliases = COALESCE(${b.aliases}, aliases),
         unit = COALESCE(${b.unit}, unit),
-        default_supplier = COALESCE(${b.default_supplier}, default_supplier)
+        default_supplier = COALESCE(${b.default_supplier}, default_supplier),
+        kind = COALESCE(${b.kind}, kind),
+        shelf_life_days = COALESCE(${b.shelf_life_days != null ? Number(b.shelf_life_days) : null}, shelf_life_days),
+        gtin = COALESCE(${b.gtin}, gtin),
+        units_per_carton = COALESCE(${b.units_per_carton != null ? Number(b.units_per_carton) : null}, units_per_carton)
         WHERE canonical_name = ${oldName}`;
       return res.status(200).json({ ok: true });
     }
