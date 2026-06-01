@@ -103,8 +103,17 @@ export default async function handler(req, res) {
       // process_date + shelf_life_days
       const shelfDate = new Date(processDate);
       shelfDate.setUTCDate(shelfDate.getUTCDate() + shelfLife);
-      // UBD = the earlier of (shelf-life cap) and (earliest input UBD).
-      const useBy = isoDate(minDate([shelfDate, inputUseBy]));
+      // UBD rule:
+      //   FRESH  → min(shelf-life cap, earliest input UBD)  — can't outlive the bird.
+      //   FROZEN → shelf-life cap only — freezing arrests spoilage, so the frozen
+      //            product legitimately outlives the fresh source UBD (no cap).
+      // A product is treated as frozen if the output is flagged frozen OR its name
+      // contains "frozen".
+      const isFrozen = out.frozen === true
+        || /frozen/i.test(product);
+      const useBy = isFrozen
+        ? isoDate(shelfDate)
+        : isoDate(minDate([shelfDate, inputUseBy]));
 
       const insLot = await sql`
         INSERT INTO lots
