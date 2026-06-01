@@ -70,34 +70,59 @@ export default async function handler(req, res) {
     // the schnitzel's UBD comes from the bird lineage (fresh) or the freeze date
     // (frozen), never from the coating. So we exclude ingredient-kind lots here.
     const inputProductNames = [...new Set(inputLots.map((l) => l.product))];
-    const kindRows = inputProductNames.length
-      ? await sql`SELECT canonical_name, kind FROM products WHERE canonical_name = ANY(${inputProductNames}::text[])`
+    const prodRowsMeta = inputProductNames.length
+      ? await sql`SELECT canonical_name, kind, category FROM products WHERE canonical_name = ANY(${inputProductNames}::text[])`
       : [];
-    const kindByName = Object.fromEntries(kindRows.map((r) => [r.canonical_name, r.kind]));
+    const kindByName = Object.fromEntries(prodRowsMeta.map((r) => [r.canonical_name, r.kind]));
+    const catByName = Object.fromEntries(prodRowsMeta.map((r) => [r.canonical_name, r.category]));
+    const catOf = (lot) => catByName[lot.product] || 'other';
     const chickenInputs = inputLots.filter((l) => (kindByName[l.product] || 'raw') !== 'ingredient');
     const ingredientInputs = inputLots.filter((l) => (kindByName[l.product] || 'raw') === 'ingredient');
     const inputUseBy = minDate(chickenInputs.map((l) => l.use_by));
 
-    // ALLERGEN TRACE HARD-BLOCK (crumbing): a crumbed schnitzel is ALWAYS batter +
-    // breading, both of which must be traced. So a crumb event must include BOTH:
-    //   (a) a BATTER input  (name contains "batter")
-    //   (b) a BREADING input (name contains "breadcrumb"/"crumb"/"panko")
-    // Missing either → reject.
+    // ───────────────────────────────────────────────────────────────────────
+    // EVENT GUARDRAILS — each event only accepts the right input category, so the
+    // app's logic matches the physical process. Categories are set per product
+    // (auto-classified, editable in Manage Products) — robust vs name-matching.
+    // ───────────────────────────────────────────────────────────────────────
+    if (eventType === 'bone_out') {
+      const ok = chickenInputs.every((l) => catOf(l) === 'whole_bird');
+      if (!chickenInputs.length || !ok) {
+        return res.status(400).json({ error: 'Bone-out takes WHOLE BIRDS only. Check the input lot.' });
+      }
+    }
+    if (eventType === 'slice') {
+      // Slicing takes breast (bought-in or boned) — not whole birds, not coatings.
+      const ok = chickenInputs.every((l) => catOf(l) === 'breast');
+      if (!chickenInputs.length || !ok) {
+        return res.status(400).json({ error: 'Slicing takes BREAST FILLET only (bought-in or boned-out).' });
+      }
+    }
     if (eventType === 'crumb') {
-      const hasChicken = chickenInputs.length > 0;            // the sliced breast
-      const hasBatter = ingredientInputs.some((l) => /batter/i.test(l.product));
-      const hasBreading = ingredientInputs.some((l) => /breadcrumb|panko|crumb/i.test(l.product));
-      if (!hasChicken || !hasBatter || !hasBreading) {
+      // ONLY sliced breast can be crumbed. Plus batter + breading for the trace.
+      const slicedBreast = chickenInputs.filter((l) => catOf(l) === 'sliced_breast');
+      const wrongChicken = chickenInputs.filter((l) => catOf(l) !== 'sliced_breast');
+      const hasBatter = ingredientInputs.some((l) => catOf(l) === 'batter' || /batter/i.test(l.product));
+      const hasBreading = ingredientInputs.some((l) => catOf(l) === 'crumb' || /breadcrumb|panko|crumb/i.test(l.product));
+      if (wrongChicken.length) {
+        return res.status(400).json({ error: `Only SLICED BREAST FILLET can be crumbed — not ${wrongChicken[0].product}.` });
+      }
+      if (!slicedBreast.length || !hasBatter || !hasBreading) {
         const missing = [
-          !hasChicken ? 'sliced breast' : null,
+          !slicedBreast.length ? 'sliced breast' : null,
           !hasBatter ? 'battermix' : null,
           !hasBreading ? 'breadcrumb/panko' : null,
         ].filter(Boolean).join(', ');
         return res.status(400).json({
-          error: `A crumbed schnitzel needs all THREE parents — sliced breast + batter + breading — for the trace. Missing: ${missing}.`,
+          error: `A crumbed schnitzel needs all THREE parents — sliced breast + batter + breading. Missing: ${missing}.`,
         });
       }
     }
+
+    // Variable coating: how many batter + crumb coats (default 1 each). Recorded on
+    // the event so "double-battered, double-crumbed" etc. is traceable.
+    const batterCoats = eventType === 'crumb' ? (Number(b.batter_coats) || 1) : null;
+    const crumbCoats = eventType === 'crumb' ? (Number(b.crumb_coats) || 1) : null;
 
     // SUPPLIER CARRY-FORWARD: a produced lot inherits the supplier of its CHICKEN
     // input (not the coating), so a schnitzel sliced from Master Poultry breast
@@ -108,8 +133,8 @@ export default async function handler(req, res) {
 
     // Create the event.
     const evRows = await sql`
-      INSERT INTO process_events (event_type, process_date, operator, notes)
-      VALUES (${eventType}, ${processDate}, ${operator}, ${strOrNull(b.notes)})
+      INSERT INTO process_events (event_type, process_date, operator, notes, batter_coats, crumb_coats)
+      VALUES (${eventType}, ${processDate}, ${operator}, ${strOrNull(b.notes)}, ${batterCoats}, ${crumbCoats})
       RETURNING *`;
     const event = evRows[0];
 

@@ -76,6 +76,23 @@ export async function ensureSchema() {
   await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS shelf_life_days INT NOT NULL DEFAULT 7`;
   await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS gtin TEXT`;
   await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS units_per_carton INT`;
+  // Process CATEGORY — drives event guardrails (what can be boned/sliced/crumbed)
+  // reliably, instead of fragile name-matching on supplier product names.
+  //   'whole_bird' | 'breast' | 'sliced_breast' | 'batter' | 'crumb' | 'other'
+  await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS category TEXT`;
+  // One-time best-effort auto-classify from the product name where category is null.
+  await sql`UPDATE products SET category = 'whole_bird'
+    WHERE category IS NULL AND (canonical_name ILIKE '%boning bird%' OR canonical_name ILIKE '%wbird%'
+      OR canonical_name ILIKE '%whole chicken%' OR canonical_name ILIKE '%pallecon%' OR canonical_name ILIKE '%bin%')`;
+  await sql`UPDATE products SET category = 'sliced_breast'
+    WHERE category IS NULL AND canonical_name ILIKE '%sliced%' AND canonical_name ILIKE '%breast%'`;
+  await sql`UPDATE products SET category = 'batter'
+    WHERE category IS NULL AND canonical_name ILIKE '%batter%'`;
+  await sql`UPDATE products SET category = 'crumb'
+    WHERE category IS NULL AND (canonical_name ILIKE '%breadcrumb%' OR canonical_name ILIKE '%panko%' OR canonical_name ILIKE '%crumb%')`;
+  await sql`UPDATE products SET category = 'breast'
+    WHERE category IS NULL AND canonical_name ILIKE '%breast%'`;
+  await sql`UPDATE products SET category = 'other' WHERE category IS NULL`;
 
   // Every physical quantity of stock is a LOT — either RECEIVED from a supplier
   // (incoming WIP) or PRODUCED internally by a process event. Produced lots carry
@@ -129,6 +146,10 @@ export async function ensureSchema() {
   )`;
   // Auto-captured bone/trim/loss (input kg − output kg) for yield analysis.
   await sql`ALTER TABLE process_events ADD COLUMN IF NOT EXISTS loss_kg NUMERIC`;
+  // Variable coating: how many batter coats + crumb coats on a crumb event
+  // (double-batter/double-crumb, single/double, single/single).
+  await sql`ALTER TABLE process_events ADD COLUMN IF NOT EXISTS batter_coats INT`;
+  await sql`ALTER TABLE process_events ADD COLUMN IF NOT EXISTS crumb_coats INT`;
 
   // Worker / operator register — the "who" for audit defence. Managed in-app
   // (Settings → Manage workers), admin-PIN gated.
