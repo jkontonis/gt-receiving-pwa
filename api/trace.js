@@ -89,9 +89,12 @@ export default async function handler(req, res) {
     }
 
     // Accept ?lot_id= or ?lot_code= (the human code printed on the label).
+    // Lot-code match is case-insensitive + whitespace-trimmed so the operator can
+    // type "gt-260601-001", "GT-260601-001", or with stray spaces and still hit.
     let lotId = Number(req.query.lot_id);
     if (!lotId && req.query.lot_code) {
-      const rows = await sql`SELECT id FROM lots WHERE lot_code = ${String(req.query.lot_code)}`;
+      const code = String(req.query.lot_code).trim();
+      const rows = await sql`SELECT id FROM lots WHERE LOWER(lot_code) = LOWER(${code})`;
       if (rows.length === 0) return res.status(404).json({ error: 'Lot code not found' });
       lotId = rows[0].id;
     }
