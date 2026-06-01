@@ -61,8 +61,18 @@ export default async function handler(req, res) {
       });
     }
 
-    // Earliest use-by across all inputs — the hard ceiling for every output.
-    const inputUseBy = minDate(inputLots.map((l) => l.use_by));
+    // Earliest use-by across CHICKEN inputs — the hard ceiling for every fresh
+    // output. INGREDIENT inputs (crumb/battermix/breadcrumb/panko) are tracked in
+    // the genealogy for allergens but their shelf life must NOT cap the schnitzel:
+    // the schnitzel's UBD comes from the bird lineage (fresh) or the freeze date
+    // (frozen), never from the coating. So we exclude ingredient-kind lots here.
+    const inputProductNames = [...new Set(inputLots.map((l) => l.product))];
+    const kindRows = inputProductNames.length
+      ? await sql`SELECT canonical_name, kind FROM products WHERE canonical_name = ANY(${inputProductNames}::text[])`
+      : [];
+    const kindByName = Object.fromEntries(kindRows.map((r) => [r.canonical_name, r.kind]));
+    const chickenInputs = inputLots.filter((l) => (kindByName[l.product] || 'raw') !== 'ingredient');
+    const inputUseBy = minDate(chickenInputs.map((l) => l.use_by));
 
     // Create the event.
     const evRows = await sql`
