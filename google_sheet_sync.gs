@@ -22,6 +22,7 @@ var MINUTES = 1; // refresh interval (1, 5, 10, 15, or 30 allowed by Google)
 function syncNow() {
   writeTab_('Lots', BASE + '/api/export?dataset=lots&format=json');
   writeTab_('Process Events', BASE + '/api/export?dataset=events&format=json');
+  writeTab_('Yield', BASE + '/api/export?dataset=yield&format=json');
   // Stamp the last refresh time on a small status cell.
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var lots = ss.getSheetByName('Lots');
@@ -69,6 +70,10 @@ function fieldKeysFor_(tabName) {
     return ['event_id', 'event_type', 'process_date', 'operator', 'made_from',
             'output_lot', 'output_product', 'output_weight_kg', 'output_qty',
             'output_unit', 'output_use_by', 'output_status', 'notes'];
+  }
+  if (tabName === 'Yield') {
+    return ['event_id', 'event_type', 'process_date', 'operator', 'input_lots',
+            'input_kg', 'output_kg', 'loss_kg', 'yield_pct', 'outputs'];
   }
   return ['lot_code', 'product', 'origin', 'status', 'supplier', 'supplier_batch',
           'kill_date', 'production_date', 'use_by', 'quantity', 'unit', 'weight_kg',

@@ -39,7 +39,66 @@ export default async function handler(req, res) {
 
     let header, objects, rows, name;
 
-    if (dataset === 'events') {
+    if (dataset === 'yield') {
+      // One row per process EVENT — input kg vs output kg, loss, and yield %, so
+      // portioning can be checked (what we get out of a whole bird / breast fillet).
+      const evs = await sql`
+        SELECT pe.id AS event_id, pe.event_type, pe.process_date, pe.operator, pe.loss_kg
+        FROM process_events pe
+        WHERE pe.created_at >= ${since}
+        ORDER BY pe.id DESC`;
+
+      // Sum input + output kg per event, and collect what was made.
+      const inAgg = {}, outAgg = {}, inLots = {}, outBreakdown = {};
+      const ins = await sql`
+        SELECT pi.event_id, pi.weight_kg AS used_kg, il.weight_kg AS lot_kg,
+               il.product, il.lot_code, pr.kind
+        FROM process_inputs pi JOIN lots il ON il.id = pi.lot_id
+        LEFT JOIN products pr ON pr.canonical_name = il.product
+        WHERE pi.event_id IN (SELECT id FROM process_events WHERE created_at >= ${since})`;
+      for (const r of ins) {
+        // Chicken inputs only count toward the yield base (coatings excluded).
+        if ((r.kind || 'raw') !== 'ingredient') {
+          const kg = Number(r.used_kg) || Number(r.lot_kg) || 0;
+          inAgg[r.event_id] = (inAgg[r.event_id] || 0) + kg;
+          (inLots[r.event_id] ||= []).push(`${r.lot_code} (${r.product})`);
+        }
+      }
+      const outs = await sql`
+        SELECT po.event_id, ol.weight_kg, ol.quantity, ol.unit, ol.product
+        FROM process_outputs po JOIN lots ol ON ol.id = po.lot_id
+        WHERE po.event_id IN (SELECT id FROM process_events WHERE created_at >= ${since})`;
+      for (const r of outs) {
+        const kg = Number(r.weight_kg) || 0;
+        outAgg[r.event_id] = (outAgg[r.event_id] || 0) + kg;
+        const qtyStr = r.quantity != null ? ` ×${r.quantity}` : '';
+        (outBreakdown[r.event_id] ||= []).push(`${r.product}: ${kg ? kg + 'kg' : ''}${qtyStr}`.trim());
+      }
+
+      objects = evs.map((e) => {
+        const inKg = Math.round((inAgg[e.event_id] || 0) * 100) / 100;
+        const outKg = Math.round((outAgg[e.event_id] || 0) * 100) / 100;
+        const loss = e.loss_kg != null ? Number(e.loss_kg) : (inKg ? Math.round((inKg - outKg) * 100) / 100 : null);
+        const yieldPct = inKg > 0 ? Math.round((outKg / inKg) * 1000) / 10 : null;
+        return {
+          event_id: e.event_id,
+          event_type: e.event_type,
+          process_date: isoDay(e.process_date),
+          operator: e.operator || '',
+          input_lots: (inLots[e.event_id] || []).join(' + '),
+          input_kg: inKg || '',
+          output_kg: outKg || '',
+          loss_kg: loss == null ? '' : loss,
+          yield_pct: yieldPct == null ? '' : yieldPct,
+          outputs: (outBreakdown[e.event_id] || []).join('  |  '),
+        };
+      });
+      header = ['Event ID', 'Process', 'Date', 'Operator', 'Input lots',
+        'Input kg', 'Output kg', 'Loss kg', 'Yield %', 'Outputs made'];
+      rows = objects.map((o) => [o.event_id, o.event_type, o.process_date, o.operator,
+        o.input_lots, o.input_kg, o.output_kg, o.loss_kg, o.yield_pct, o.outputs]);
+      name = 'yield';
+    } else if (dataset === 'events') {
       // One row per produced output, carrying the event + its input genealogy.
       const evs = await sql`
         SELECT pe.id AS event_id, pe.event_type, pe.process_date, pe.operator, pe.notes,

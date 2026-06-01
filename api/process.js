@@ -78,14 +78,33 @@ export default async function handler(req, res) {
     const ingredientInputs = inputLots.filter((l) => (kindByName[l.product] || 'raw') === 'ingredient');
     const inputUseBy = minDate(chickenInputs.map((l) => l.use_by));
 
-    // ALLERGEN TRACE HARD-BLOCK: a crumb event MUST include at least one ingredient
-    // input (battermix / breadcrumb / panko) so every crumbed schnitzel carries its
-    // allergen lineage. No ingredient → reject.
-    if (eventType === 'crumb' && ingredientInputs.length === 0) {
-      return res.status(400).json({
-        error: 'Crumbing requires a coating ingredient input (battermix / breadcrumb / panko) so the allergen trace is recorded.',
-      });
+    // ALLERGEN TRACE HARD-BLOCK (crumbing): a crumbed schnitzel is ALWAYS batter +
+    // breading, both of which must be traced. So a crumb event must include BOTH:
+    //   (a) a BATTER input  (name contains "batter")
+    //   (b) a BREADING input (name contains "breadcrumb"/"crumb"/"panko")
+    // Missing either → reject.
+    if (eventType === 'crumb') {
+      const hasChicken = chickenInputs.length > 0;            // the sliced breast
+      const hasBatter = ingredientInputs.some((l) => /batter/i.test(l.product));
+      const hasBreading = ingredientInputs.some((l) => /breadcrumb|panko|crumb/i.test(l.product));
+      if (!hasChicken || !hasBatter || !hasBreading) {
+        const missing = [
+          !hasChicken ? 'sliced breast' : null,
+          !hasBatter ? 'battermix' : null,
+          !hasBreading ? 'breadcrumb/panko' : null,
+        ].filter(Boolean).join(', ');
+        return res.status(400).json({
+          error: `A crumbed schnitzel needs all THREE parents — sliced breast + batter + breading — for the trace. Missing: ${missing}.`,
+        });
+      }
     }
+
+    // SUPPLIER CARRY-FORWARD: a produced lot inherits the supplier of its CHICKEN
+    // input (not the coating), so a schnitzel sliced from Master Poultry breast
+    // traces straight back to Master Poultry on the lot/label/sheet. If chicken
+    // inputs span multiple suppliers, join them.
+    const chickenSuppliers = [...new Set(chickenInputs.map((l) => l.supplier).filter(Boolean))];
+    const inheritedSupplier = chickenSuppliers.length ? chickenSuppliers.join(' + ') : null;
 
     // Create the event.
     const evRows = await sql`
@@ -141,11 +160,12 @@ export default async function handler(req, res) {
       const insLot = await sql`
         INSERT INTO lots
           (lot_code, product, origin, status, production_date, use_by,
-           quantity, unit, weight_kg, container, notes, operator, site)
+           quantity, unit, weight_kg, container, notes, operator, site, supplier)
         VALUES
           ('PENDING', ${product}, 'produced', 'available', ${processDate}, ${useBy},
            ${numOrNull(out.quantity)}, ${strOrNull(out.unit)}, ${numOrNull(out.weight_kg)},
-           ${strOrNull(out.container)}, ${strOrNull(out.notes)}, ${operator}, ${strOrNull(b.site)})
+           ${strOrNull(out.container)}, ${strOrNull(out.notes)}, ${operator}, ${strOrNull(b.site)},
+           ${inheritedSupplier})
         RETURNING *`;
       const lot = insLot[0];
       const code = strOrNull(out.lot_code) || lotCodeFor(processDate, lot.id);
