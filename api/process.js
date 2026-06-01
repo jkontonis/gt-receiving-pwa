@@ -39,6 +39,9 @@ export default async function handler(req, res) {
     const b = req.body || {};
     const eventType = strOrNull(b.event_type);
     if (!eventType) return res.status(400).json({ error: 'Missing required field: event_type' });
+    // Operator (who did the work) is REQUIRED for audit defence.
+    const operator = strOrNull(b.operator);
+    if (!operator) return res.status(400).json({ error: 'An operator (worker) is required.' });
     const processDate = strOrNull(b.process_date) || new Date().toISOString().slice(0, 10);
     const inputs = Array.isArray(b.inputs) ? b.inputs : [];
     const outputs = Array.isArray(b.outputs) ? b.outputs : [];
@@ -72,12 +75,22 @@ export default async function handler(req, res) {
       : [];
     const kindByName = Object.fromEntries(kindRows.map((r) => [r.canonical_name, r.kind]));
     const chickenInputs = inputLots.filter((l) => (kindByName[l.product] || 'raw') !== 'ingredient');
+    const ingredientInputs = inputLots.filter((l) => (kindByName[l.product] || 'raw') === 'ingredient');
     const inputUseBy = minDate(chickenInputs.map((l) => l.use_by));
+
+    // ALLERGEN TRACE HARD-BLOCK: a crumb event MUST include at least one ingredient
+    // input (battermix / breadcrumb / panko) so every crumbed schnitzel carries its
+    // allergen lineage. No ingredient → reject.
+    if (eventType === 'crumb' && ingredientInputs.length === 0) {
+      return res.status(400).json({
+        error: 'Crumbing requires a coating ingredient input (battermix / breadcrumb / panko) so the allergen trace is recorded.',
+      });
+    }
 
     // Create the event.
     const evRows = await sql`
       INSERT INTO process_events (event_type, process_date, operator, notes)
-      VALUES (${eventType}, ${processDate}, ${strOrNull(b.operator)}, ${strOrNull(b.notes)})
+      VALUES (${eventType}, ${processDate}, ${operator}, ${strOrNull(b.notes)})
       RETURNING *`;
     const event = evRows[0];
 
@@ -128,11 +141,11 @@ export default async function handler(req, res) {
       const insLot = await sql`
         INSERT INTO lots
           (lot_code, product, origin, status, production_date, use_by,
-           quantity, unit, weight_kg, container, notes)
+           quantity, unit, weight_kg, container, notes, operator, site)
         VALUES
           ('PENDING', ${product}, 'produced', 'available', ${processDate}, ${useBy},
            ${numOrNull(out.quantity)}, ${strOrNull(out.unit)}, ${numOrNull(out.weight_kg)},
-           ${strOrNull(out.container)}, ${strOrNull(out.notes)})
+           ${strOrNull(out.container)}, ${strOrNull(out.notes)}, ${operator}, ${strOrNull(b.site)})
         RETURNING *`;
       const lot = insLot[0];
       const code = strOrNull(out.lot_code) || lotCodeFor(processDate, lot.id);
@@ -143,10 +156,21 @@ export default async function handler(req, res) {
       producedLots.push(finalLot);
     }
 
+    // Auto-capture bone/trim/loss = chicken input kg − produced output kg. Only
+    // weighed kg count (piece-count "each" outputs and ingredient inputs excluded).
+    const inputKg = chickenInputs.reduce((a, l) => a + (Number(l.weight_kg) || 0), 0);
+    const outputKg = producedLots.reduce((a, l) => a + (Number(l.weight_kg) || 0), 0);
+    const lossKg = inputKg > 0 ? Math.round((inputKg - outputKg) * 100) / 100 : null;
+    if (lossKg !== null) {
+      await sql`UPDATE process_events SET loss_kg = ${lossKg} WHERE id = ${event.id}`;
+      event.loss_kg = lossKg;
+    }
+
     return res.status(201).json({
       event,
       inputs: inputLots.map((l) => ({ id: l.id, lot_code: l.lot_code, product: l.product })),
       outputs: producedLots,
+      loss_kg: lossKg,
     });
   } catch (err) {
     console.error('process error', err);

@@ -72,7 +72,7 @@ function fieldKeysFor_(tabName) {
   }
   return ['lot_code', 'product', 'origin', 'status', 'supplier', 'supplier_batch',
           'kill_date', 'production_date', 'use_by', 'quantity', 'unit', 'weight_kg',
-          'container', 'notes', 'has_photo', 'logged_at'];
+          'container', 'temp_c', 'temp_status', 'operator', 'site', 'notes', 'has_photo', 'logged_at'];
 }
 
 function installTrigger() {

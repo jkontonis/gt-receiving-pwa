@@ -104,6 +104,13 @@ export async function ensureSchema() {
   // queued lot after coming back online without creating a duplicate.
   await sql`ALTER TABLE lots ADD COLUMN IF NOT EXISTS photo TEXT`;
   await sql`ALTER TABLE lots ADD COLUMN IF NOT EXISTS client_id TEXT`;
+  // Cold-chain: arrival temperature as real data (received lots) + out-of-spec flag.
+  await sql`ALTER TABLE lots ADD COLUMN IF NOT EXISTS temp_c NUMERIC`;
+  await sql`ALTER TABLE lots ADD COLUMN IF NOT EXISTS temp_ok BOOLEAN`;
+  // Who created the lot (operator/worker) — audit "who".
+  await sql`ALTER TABLE lots ADD COLUMN IF NOT EXISTS operator TEXT`;
+  // PrimeSafe site that did the work (e.g. 'Flemington P01491' / 'Brooklyn P00675').
+  await sql`ALTER TABLE lots ADD COLUMN IF NOT EXISTS site TEXT`;
   await sql`CREATE INDEX IF NOT EXISTS idx_lots_product ON lots(product)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_lots_status ON lots(status)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_lots_supplier ON lots(supplier)`;
@@ -119,6 +126,18 @@ export async function ensureSchema() {
     operator      TEXT,
     notes         TEXT,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`;
+  // Auto-captured bone/trim/loss (input kg − output kg) for yield analysis.
+  await sql`ALTER TABLE process_events ADD COLUMN IF NOT EXISTS loss_kg NUMERIC`;
+
+  // Worker / operator register — the "who" for audit defence. Managed in-app
+  // (Settings → Manage workers), admin-PIN gated.
+  await sql`CREATE TABLE IF NOT EXISTS workers (
+    id         SERIAL PRIMARY KEY,
+    worker_id  TEXT UNIQUE NOT NULL,        -- e.g. staff code from GT-QC-00
+    name       TEXT NOT NULL,
+    status     TEXT NOT NULL DEFAULT 'Active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`;
 
   await sql`CREATE TABLE IF NOT EXISTS process_inputs (

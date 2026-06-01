@@ -89,7 +89,8 @@ export default async function handler(req, res) {
       const lots = await sql`
         SELECT id, lot_code, product, origin, status, supplier, supplier_batch,
                kill_date, production_date, use_by, quantity, unit, weight_kg,
-               container, notes, created_at, (photo IS NOT NULL) AS has_photo
+               container, notes, created_at, temp_c, temp_ok, operator, site,
+               (photo IS NOT NULL) AS has_photo
         FROM lots
         WHERE created_at >= ${since}
         ORDER BY id DESC`;
@@ -107,16 +108,20 @@ export default async function handler(req, res) {
         unit: l.unit || '',
         weight_kg: l.weight_kg,
         container: l.container || '',
+        temp_c: l.temp_c,
+        temp_status: l.temp_ok === null || l.temp_ok === undefined ? '' : (l.temp_ok ? 'OK' : 'OUT OF SPEC'),
+        operator: l.operator || '',
+        site: l.site || '',
         notes: l.notes || '',
         has_photo: l.has_photo ? 'Y' : '',
         logged_at: isoTs(l.created_at),
       }));
       header = ['Lot code', 'Product', 'Origin', 'Status', 'Supplier', 'Supplier batch',
         'Kill date', 'Production date', 'Use-by', 'Quantity', 'Unit', 'Weight (kg)',
-        'Container', 'Notes', 'Photo', 'Logged at (UTC)'];
+        'Container', 'Temp °C', 'Temp status', 'Operator', 'Site', 'Notes', 'Photo', 'Logged at (UTC)'];
       rows = objects.map((o) => [o.lot_code, o.product, o.origin, o.status, o.supplier,
         o.supplier_batch, o.kill_date, o.production_date, o.use_by, o.quantity, o.unit,
-        o.weight_kg, o.container, o.notes, o.has_photo, o.logged_at]);
+        o.weight_kg, o.container, o.temp_c, o.temp_status, o.operator, o.site, o.notes, o.has_photo, o.logged_at]);
       name = 'lots';
     }
 

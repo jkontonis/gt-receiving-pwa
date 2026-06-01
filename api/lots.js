@@ -88,17 +88,20 @@ export default async function handler(req, res) {
       }
 
       const status = strOrNull(b.status) || 'available';
+      // Cold-chain: arrival temp as data + out-of-spec flag (chilled ≤ 4 °C).
+      const tempC = numOrNull(b.temp_c);
+      const tempOk = tempC === null ? null : (tempC <= 4);
       const inserted = await sql`
         INSERT INTO lots
           (lot_code, product, origin, status, supplier, supplier_batch,
            kill_date, production_date, use_by, quantity, unit, weight_kg,
-           container, receipt_id, notes, photo, client_id)
+           container, receipt_id, notes, photo, client_id, temp_c, temp_ok, operator, site)
         VALUES
           ('PENDING', ${product}, 'received', ${status}, ${strOrNull(b.supplier)},
            ${strOrNull(b.supplier_batch)}, ${strOrNull(b.kill_date)}, ${productionDate},
            ${strOrNull(b.use_by)}, ${qty}, ${strOrNull(b.unit)}, ${weight},
            ${strOrNull(b.container)}, ${numOrNull(b.receipt_id)}, ${strOrNull(b.notes)},
-           ${photo}, ${clientId})
+           ${photo}, ${clientId}, ${tempC}, ${tempOk}, ${strOrNull(b.operator)}, ${strOrNull(b.site)})
         RETURNING id`;
       const newId = inserted[0].id;
       const code = strOrNull(b.lot_code) || lotCodeFor(productionDate, newId);
@@ -106,7 +109,8 @@ export default async function handler(req, res) {
         UPDATE lots SET lot_code = ${code} WHERE id = ${newId}
         RETURNING id, lot_code, product, origin, status, supplier, supplier_batch,
                   kill_date, production_date, use_by, quantity, unit, weight_kg,
-                  container, receipt_id, notes, created_at, (photo IS NOT NULL) AS has_photo`;
+                  container, receipt_id, notes, created_at, temp_c, temp_ok, operator, site,
+                  (photo IS NOT NULL) AS has_photo`;
       return res.status(201).json({ lot: updated[0] });
     }
 
@@ -120,7 +124,8 @@ export default async function handler(req, res) {
         const rows = await sql`
           SELECT id, lot_code, product, origin, status, supplier, supplier_batch,
                  kill_date, production_date, use_by, quantity, unit, weight_kg,
-                 container, receipt_id, notes, created_at, (photo IS NOT NULL) AS has_photo
+                 container, receipt_id, notes, created_at, temp_c, temp_ok, operator, site,
+                 (photo IS NOT NULL) AS has_photo
           FROM lots WHERE id = ${Number(id)}`;
         if (rows.length === 0) return res.status(404).json({ error: 'Lot not found' });
         return res.status(200).json({ lot: rows[0] });
@@ -135,7 +140,8 @@ export default async function handler(req, res) {
       const rows = await sql`
         SELECT id, lot_code, product, origin, status, supplier, supplier_batch,
                kill_date, production_date, use_by, quantity, unit, weight_kg,
-               container, receipt_id, notes, created_at, (photo IS NOT NULL) AS has_photo
+               container, receipt_id, notes, created_at, temp_c, temp_ok, operator, site,
+               (photo IS NOT NULL) AS has_photo
         FROM lots
         WHERE created_at >= ${since}
           AND (${st}::text IS NULL OR status = ${st})
