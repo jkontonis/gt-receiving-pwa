@@ -91,7 +91,8 @@ export async function ensureSchema() {
   await sql`UPDATE products SET category = 'crumb'
     WHERE category IS NULL AND (canonical_name ILIKE '%breadcrumb%' OR canonical_name ILIKE '%panko%' OR canonical_name ILIKE '%crumb%')`;
   await sql`UPDATE products SET category = 'breast'
-    WHERE category IS NULL AND canonical_name ILIKE '%breast%'`;
+    WHERE category IS NULL AND (canonical_name ILIKE '%breast%'
+      OR canonical_name ILIKE '%br/fillet%' OR canonical_name ILIKE '%br fillet%')`;
   await sql`UPDATE products SET category = 'other' WHERE category IS NULL`;
 
   // Every physical quantity of stock is a LOT — either RECEIVED from a supplier
