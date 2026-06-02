@@ -92,8 +92,11 @@ export async function ensureSchema() {
       WHERE category IS NULL AND canonical_name ILIKE '%sliced%' AND canonical_name ILIKE '%breast%'`;
     await sql`UPDATE products SET category = 'batter'
       WHERE category IS NULL AND canonical_name ILIKE '%batter%'`;
+    // Breadcrumb/panko coating INGREDIENT only — NOT finished "Crumbed Schnitzel"
+    // products (those are outputs, category 'other'). Exclude schnitzels here.
     await sql`UPDATE products SET category = 'crumb'
-      WHERE category IS NULL AND (canonical_name ILIKE '%breadcrumb%' OR canonical_name ILIKE '%panko%' OR canonical_name ILIKE '%crumb%')`;
+      WHERE category IS NULL AND canonical_name NOT ILIKE '%schnitzel%'
+        AND (canonical_name ILIKE '%breadcrumb%' OR canonical_name ILIKE '%panko%' OR canonical_name ILIKE '%crumb%')`;
     await sql`UPDATE products SET category = 'breast'
       WHERE category IS NULL AND (canonical_name ILIKE '%breast%'
         OR canonical_name ILIKE '%br/fillet%' OR canonical_name ILIKE '%br fillet%')`;
