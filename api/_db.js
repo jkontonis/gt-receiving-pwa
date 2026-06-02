@@ -80,20 +80,25 @@ export async function ensureSchema() {
   // reliably, instead of fragile name-matching on supplier product names.
   //   'whole_bird' | 'breast' | 'sliced_breast' | 'batter' | 'crumb' | 'other'
   await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS category TEXT`;
-  // One-time best-effort auto-classify from the product name where category is null.
-  await sql`UPDATE products SET category = 'whole_bird'
-    WHERE category IS NULL AND (canonical_name ILIKE '%boning bird%' OR canonical_name ILIKE '%wbird%'
-      OR canonical_name ILIKE '%whole chicken%' OR canonical_name ILIKE '%pallecon%' OR canonical_name ILIKE '%bin%')`;
-  await sql`UPDATE products SET category = 'sliced_breast'
-    WHERE category IS NULL AND canonical_name ILIKE '%sliced%' AND canonical_name ILIKE '%breast%'`;
-  await sql`UPDATE products SET category = 'batter'
-    WHERE category IS NULL AND canonical_name ILIKE '%batter%'`;
-  await sql`UPDATE products SET category = 'crumb'
-    WHERE category IS NULL AND (canonical_name ILIKE '%breadcrumb%' OR canonical_name ILIKE '%panko%' OR canonical_name ILIKE '%crumb%')`;
-  await sql`UPDATE products SET category = 'breast'
-    WHERE category IS NULL AND (canonical_name ILIKE '%breast%'
-      OR canonical_name ILIKE '%br/fillet%' OR canonical_name ILIKE '%br fillet%')`;
-  await sql`UPDATE products SET category = 'other' WHERE category IS NULL`;
+  // One-time best-effort auto-classify — only runs when there are UNcategorised
+  // products, so it's skipped on every normal cold start (was 6 full-table scans
+  // per request, a needless drag). Once everything has a category, this no-ops.
+  const uncat = await sql`SELECT COUNT(*)::int AS n FROM products WHERE category IS NULL`;
+  if (uncat[0].n > 0) {
+    await sql`UPDATE products SET category = 'whole_bird'
+      WHERE category IS NULL AND (canonical_name ILIKE '%boning bird%' OR canonical_name ILIKE '%wbird%'
+        OR canonical_name ILIKE '%whole chicken%' OR canonical_name ILIKE '%pallecon%' OR canonical_name ILIKE '%bin%')`;
+    await sql`UPDATE products SET category = 'sliced_breast'
+      WHERE category IS NULL AND canonical_name ILIKE '%sliced%' AND canonical_name ILIKE '%breast%'`;
+    await sql`UPDATE products SET category = 'batter'
+      WHERE category IS NULL AND canonical_name ILIKE '%batter%'`;
+    await sql`UPDATE products SET category = 'crumb'
+      WHERE category IS NULL AND (canonical_name ILIKE '%breadcrumb%' OR canonical_name ILIKE '%panko%' OR canonical_name ILIKE '%crumb%')`;
+    await sql`UPDATE products SET category = 'breast'
+      WHERE category IS NULL AND (canonical_name ILIKE '%breast%'
+        OR canonical_name ILIKE '%br/fillet%' OR canonical_name ILIKE '%br fillet%')`;
+    await sql`UPDATE products SET category = 'other' WHERE category IS NULL`;
+  }
 
   // Every physical quantity of stock is a LOT — either RECEIVED from a supplier
   // (incoming WIP) or PRODUCED internally by a process event. Produced lots carry
