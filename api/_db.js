@@ -103,6 +103,21 @@ export async function ensureSchema() {
     await sql`UPDATE products SET category = 'other' WHERE category IS NULL`;
   }
 
+  // --- Idempotent data corrections (run every cold start; all no-op once applied) ---
+  // 1. Finished crumbed schnitzels were mis-tagged category 'crumb' (= the raw
+  //    breadcrumb ingredient). They're FINISHED products → 'other'. Removes the
+  //    collision that let schnitzels appear as crumb inputs / wrong output lists.
+  await sql`UPDATE products SET category = 'other'
+    WHERE canonical_name ILIKE '%schnitzel%' AND category = 'crumb'`;
+  // 2. Gourmet bought-in breast had no breast keyword → was 'other'; it's a breast
+  //    fillet that goes to slicing, so it must be category 'breast'.
+  await sql`UPDATE products SET category = 'breast'
+    WHERE canonical_name = 'Frsh BR/FILLET (S/Off) P/C 17+'`;
+  // 3. Duplicate wings product: keep 'Chicken Wings', remove the bare 'Wings'
+  //    (only if it isn't referenced by any lot, to avoid breaking genealogy).
+  await sql`DELETE FROM products WHERE canonical_name = 'Wings'
+    AND NOT EXISTS (SELECT 1 FROM lots WHERE product = 'Wings')`;
+
   // Every physical quantity of stock is a LOT — either RECEIVED from a supplier
   // (incoming WIP) or PRODUCED internally by a process event. Produced lots carry
   // a use-by date down from their source (never reset fresh).
