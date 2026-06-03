@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS lots (
   client_id       TEXT,                              -- offline replay de-dupe key
   dispatched_at   TIMESTAMPTZ,                       -- when shipped (null until dispatched)
   customer        TEXT,                              -- dispatch destination (e.g. 'Brooklyn (P00675)')
+  dispatch_temp_c NUMERIC,                            -- cold-chain probe °C at dispatch (truck load-out)
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_lots_product ON lots(product);

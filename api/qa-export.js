@@ -148,9 +148,10 @@ function renderBrief(brief) {
     for (const d of brief.dispatch.lines) {
       const time = hhmm(d.dispatched_at) || '[FILL: time]';
       const dest = d.customer || 'Brooklyn (P00675)';
+      const probe = d.dispatch_temp_c != null ? `probe ${d.dispatch_temp_c}°C` : '[FILL: probe °C]';
       L.push(
         `- ${time}, ${qtyStr(d.weight_kg, d.quantity, d.unit)} "${d.product}" [${d.lot_code}]` +
-        ` → ${dest}, [FILL: probe °C]`
+        ` → ${dest}, ${probe}`
       );
     }
   }
@@ -247,7 +248,7 @@ export default async function handler(req, res) {
     // excluded here (surfaced separately as a count for honesty). ---
     const dispatched = await sql`
       SELECT lot_code, product, supplier, weight_kg, unit, quantity, use_by,
-             dispatched_at, customer
+             dispatched_at, customer, dispatch_temp_c
       FROM lots
       WHERE status = 'shipped' AND dispatched_at::date = ${date}
       ORDER BY dispatched_at`;
@@ -301,6 +302,7 @@ export default async function handler(req, res) {
           use_by: d.use_by ? isoDay(d.use_by) : null,
           dispatched_at: d.dispatched_at ? new Date(d.dispatched_at).toISOString() : null,
           customer: d.customer || null,
+          dispatch_temp_c: num(d.dispatch_temp_c),
         })),
         undated_shipped_count: undatedShipped[0] ? undatedShipped[0].n : 0,
         note: 'Dispatches shipped on this date (lots.js stamps dispatched_at when status→shipped).',

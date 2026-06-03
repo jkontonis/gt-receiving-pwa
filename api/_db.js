@@ -156,6 +156,8 @@ export async function ensureSchema() {
   // per-day with a real time + customer (status='shipped' alone has no timestamp).
   await sql`ALTER TABLE lots ADD COLUMN IF NOT EXISTS dispatched_at TIMESTAMPTZ`;
   await sql`ALTER TABLE lots ADD COLUMN IF NOT EXISTS customer TEXT`;
+  // Cold-chain probe temperature taken at dispatch (truck load-out reading).
+  await sql`ALTER TABLE lots ADD COLUMN IF NOT EXISTS dispatch_temp_c NUMERIC`;
   await sql`CREATE INDEX IF NOT EXISTS idx_lots_product ON lots(product)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_lots_status ON lots(status)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_lots_supplier ON lots(supplier)`;
