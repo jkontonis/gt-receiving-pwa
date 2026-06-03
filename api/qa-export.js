@@ -28,6 +28,144 @@ function sumWeights(rows) {
   return rows.reduce((acc, r) => acc + (num(r.weight_kg) || 0), 0);
 }
 
+// --- Records-Pack brief rendering (?format=brief) -------------------------
+// Turns the JSON brief into the exact text template the gt-chickens-records-pack
+// skill consumes (RECEIVALS / PRODUCTION / DISPATCHES / PERSONNEL / MAINTENANCE /
+// NCs / CARRY-OVER). App-known fields are pre-filled; office-only fields the app
+// can't know are emitted as [FILL …] so John completes them in one pass.
+
+// Approved-supplier codes per the skill's master register. Only suppliers with an
+// allocated code are mapped; others print by name (the skill activates codes later).
+const SUPPLIER_CODES = {
+  inghams: 'S-02',
+  "hazeldene's": 'S-06',
+  hazeldenes: 'S-06',
+  hazeldene: 'S-06',
+};
+
+function supplierWithCode(name) {
+  if (!name) return '[FILL: supplier]';
+  const code = SUPPLIER_CODES[String(name).trim().toLowerCase()];
+  return code ? `${name} (${code})` : name;
+}
+
+function ddmmyyyy(iso) {
+  if (!iso) return null;
+  const [y, m, d] = iso.slice(0, 10).split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function weekday(iso) {
+  // iso = 'YYYY-MM-DD' → 'Mon'..'Sun' (parse as local midnight, no TZ drift)
+  const dt = new Date(`${iso}T00:00:00`);
+  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dt.getDay()];
+}
+
+function probeFromNote(note) {
+  if (!note) return null;
+  const m = String(note).match(/(-?\d+(?:\.\d+)?)\s*°?C/i);
+  return m ? `probe ${m[1]}°C` : null;
+}
+
+function qtyStr(weightKg, quantity, unit) {
+  if (weightKg != null) return `${weightKg} kg`;
+  if (quantity != null) {
+    const u = unit || 'unit';
+    const plural = quantity !== 1 && !/s$/.test(u) ? `${u}s` : u;
+    return `${quantity} ${plural}`;
+  }
+  return '[FILL: qty]';
+}
+
+function renderBrief(brief) {
+  const L = [];
+  L.push(`Day [N] — ${weekday(brief.date)} ${ddmmyyyy(brief.date)}`);
+  L.push('');
+  L.push('# Pre-filled from the receiving app (lots + process events).');
+  L.push('# [FILL …] = office-only fields the app does not capture — complete before building the pack.');
+  L.push('');
+
+  // RECEIVALS
+  L.push('RECEIVALS:');
+  if (!brief.receivals.lines.length) {
+    L.push('- NIL');
+  } else {
+    for (const r of brief.receivals.lines) {
+      const detail = [];
+      if (r.supplier_batch) detail.push(`supplier lot ${r.supplier_batch}`);
+      if (r.use_by) detail.push(`UBD ${ddmmyyyy(r.use_by)}`);
+      if (r.kill_date) detail.push(`kill ${ddmmyyyy(r.kill_date)}`);
+      const detailStr = detail.length ? ` (${detail.join(', ')})` : '';
+      const probe = probeFromNote(r.arrival_temp_note) || '[FILL: probe °C]';
+      const docket = r.has_docket_photo ? ' [docket photo on file]' : '';
+      L.push(
+        `- ${supplierWithCode(r.supplier)}, Inv [FILL: invoice/del #], ` +
+        `${qtyStr(r.weight_kg, r.quantity, r.unit)} "${r.product}"${detailStr}, ` +
+        `${probe}${docket}`
+      );
+    }
+  }
+  L.push('');
+
+  // PRODUCTION / BONING
+  L.push('PRODUCTION / BONING:');
+  if (!brief.processing.events.length) {
+    L.push('- NIL');
+  } else {
+    for (const ev of brief.processing.events) {
+      const ins = ev.inputs.map(i => `${i.product} [${i.lot_code}]`).join(' + ') || '[inputs]';
+      const outs = ev.outputs
+        .map(o => `${o.product} ${qtyStr(num(o.weight_kg), num(o.quantity), o.unit)} [${o.lot_code}]`)
+        .join(', ') || '[outputs]';
+      const yieldStr = ev.yield_pct != null ? `, yield ${ev.yield_pct}%` : '';
+      const op = ev.operator ? `, operator ${ev.operator}` : '';
+      L.push(
+        `- ${String(ev.event_type).toUpperCase()} (${ddmmyyyy(ev.process_date)}): ${ins} → ${outs}` +
+        ` [in ${ev.input_weight_kg} kg → out ${ev.output_weight_kg} kg${yieldStr}]${op}`
+      );
+      if (ev.notes) L.push(`  note: ${ev.notes}`);
+    }
+  }
+  L.push('');
+
+  // DISPATCHES
+  L.push('DISPATCHES:');
+  if (!brief.dispatch.lines.length) {
+    L.push('- NIL');
+  } else {
+    L.push('# NB: app has no per-dispatch timestamp/customer — confirm these.');
+    for (const d of brief.dispatch.lines) {
+      L.push(
+        `- [FILL: time], ${qtyStr(d.weight_kg, d.quantity, d.unit)} "${d.product}" [${d.lot_code}]` +
+        ` → Brooklyn (P00675), [FILL: probe °C]`
+      );
+    }
+  }
+  L.push('');
+
+  // Office-only sections the app can't source
+  L.push('PERSONNEL ON SITE:');
+  L.push('- [FILL: boning crew / inductions / visitors — or NIL]');
+  L.push('');
+  L.push('MAINTENANCE / VISITS:');
+  L.push('- [FILL: WO# / contractor / scope / outcome — or NIL]');
+  L.push('');
+  L.push('NCs / HOLDS / COMPLAINTS:');
+  L.push('- [FILL: NC# / batch / issue / action — or NIL]');
+  L.push('');
+  L.push('CARRY-OVER CHANGES:');
+  L.push('- [FILL: items closed/opened today; PSL-005/006 default OPEN]');
+  L.push('');
+
+  // Throughput footer (backs F40 Throughput Register P01491)
+  L.push(
+    `THROUGHPUT (F40): received ${brief.throughput_kg.received} kg, ` +
+    `produced ${brief.throughput_kg.produced} kg.`
+  );
+
+  return L.join('\n');
+}
+
 export default async function handler(req, res) {
   try {
     await ensureSchema();
@@ -149,6 +287,12 @@ export default async function handler(req, res) {
         produced: Math.round(producedKg * 100) / 100,
       },
     };
+
+    const format = req.query && req.query.format ? String(req.query.format).toLowerCase() : 'json';
+    if (format === 'brief' || format === 'text') {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      return res.status(200).send(renderBrief(brief));
+    }
 
     return res.status(200).json(brief);
   } catch (e) {
