@@ -152,6 +152,10 @@ export async function ensureSchema() {
   await sql`ALTER TABLE lots ADD COLUMN IF NOT EXISTS operator TEXT`;
   // PrimeSafe site that did the work (e.g. 'Flemington P01491' / 'Brooklyn P00675').
   await sql`ALTER TABLE lots ADD COLUMN IF NOT EXISTS site TEXT`;
+  // Dispatch: when a lot was shipped + to whom. Lets the QA brief report dispatches
+  // per-day with a real time + customer (status='shipped' alone has no timestamp).
+  await sql`ALTER TABLE lots ADD COLUMN IF NOT EXISTS dispatched_at TIMESTAMPTZ`;
+  await sql`ALTER TABLE lots ADD COLUMN IF NOT EXISTS customer TEXT`;
   await sql`CREATE INDEX IF NOT EXISTS idx_lots_product ON lots(product)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_lots_status ON lots(status)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_lots_supplier ON lots(supplier)`;

@@ -165,19 +165,28 @@ export default async function handler(req, res) {
       if (!id) return res.status(400).json({ error: 'Missing id' });
       // COALESCE-merge pattern: only the keys present in the body change; a
       // missing key keeps the existing value, an explicit null clears it.
+      // Dispatch convenience: marking a lot 'shipped' auto-stamps dispatched_at
+      // (now) unless the caller passed one explicitly — so the QA brief gets a
+      // real per-day dispatch time without the client having to send a clock.
+      if (b.status === 'shipped' && !('dispatched_at' in b)) {
+        b.dispatched_at = new Date().toISOString();
+      }
       const has = (k) => k in b;
       const val = (k) => (b[k] === '' ? null : b[k]);
-      if (!['status', 'use_by', 'weight_kg', 'quantity', 'notes', 'container'].some(has)) {
+      if (!['status', 'use_by', 'weight_kg', 'quantity', 'notes', 'container',
+            'dispatched_at', 'customer'].some(has)) {
         return res.status(400).json({ error: 'Nothing to update' });
       }
       const rows = await sql`
         UPDATE lots SET
-          status    = CASE WHEN ${has('status')}    THEN ${val('status')}           ELSE status    END,
-          use_by    = CASE WHEN ${has('use_by')}    THEN ${val('use_by')}::date    ELSE use_by    END,
-          weight_kg = CASE WHEN ${has('weight_kg')} THEN ${val('weight_kg')}::numeric ELSE weight_kg END,
-          quantity  = CASE WHEN ${has('quantity')}  THEN ${val('quantity')}::numeric  ELSE quantity END,
-          notes     = CASE WHEN ${has('notes')}     THEN ${val('notes')}             ELSE notes     END,
-          container = CASE WHEN ${has('container')} THEN ${val('container')}         ELSE container END
+          status        = CASE WHEN ${has('status')}        THEN ${val('status')}             ELSE status        END,
+          use_by        = CASE WHEN ${has('use_by')}        THEN ${val('use_by')}::date      ELSE use_by        END,
+          weight_kg     = CASE WHEN ${has('weight_kg')}     THEN ${val('weight_kg')}::numeric ELSE weight_kg     END,
+          quantity      = CASE WHEN ${has('quantity')}      THEN ${val('quantity')}::numeric  ELSE quantity      END,
+          notes         = CASE WHEN ${has('notes')}         THEN ${val('notes')}              ELSE notes         END,
+          container     = CASE WHEN ${has('container')}     THEN ${val('container')}          ELSE container     END,
+          dispatched_at = CASE WHEN ${has('dispatched_at')} THEN ${val('dispatched_at')}::timestamptz ELSE dispatched_at END,
+          customer      = CASE WHEN ${has('customer')}      THEN ${val('customer')}           ELSE customer      END
         WHERE id = ${id}
         RETURNING *`;
       if (rows.length === 0) return res.status(404).json({ error: 'Lot not found' });

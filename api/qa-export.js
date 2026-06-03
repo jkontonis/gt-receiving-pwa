@@ -61,6 +61,18 @@ function weekday(iso) {
   return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dt.getDay()];
 }
 
+function hhmm(iso) {
+  // ISO timestamp → 'HH:MM' in Melbourne time (AEST UTC+10; the site is Flemington VIC)
+  if (!iso) return null;
+  try {
+    return new Date(iso).toLocaleTimeString('en-AU', {
+      hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Australia/Melbourne',
+    });
+  } catch {
+    return iso.slice(11, 16);
+  }
+}
+
 function probeFromNote(note) {
   if (!note) return null;
   const m = String(note).match(/(-?\d+(?:\.\d+)?)\s*°?C/i);
@@ -133,13 +145,17 @@ function renderBrief(brief) {
   if (!brief.dispatch.lines.length) {
     L.push('- NIL');
   } else {
-    L.push('# NB: app has no per-dispatch timestamp/customer — confirm these.');
     for (const d of brief.dispatch.lines) {
+      const time = hhmm(d.dispatched_at) || '[FILL: time]';
+      const dest = d.customer || 'Brooklyn (P00675)';
       L.push(
-        `- [FILL: time], ${qtyStr(d.weight_kg, d.quantity, d.unit)} "${d.product}" [${d.lot_code}]` +
-        ` → Brooklyn (P00675), [FILL: probe °C]`
+        `- ${time}, ${qtyStr(d.weight_kg, d.quantity, d.unit)} "${d.product}" [${d.lot_code}]` +
+        ` → ${dest}, [FILL: probe °C]`
       );
     }
+  }
+  if (brief.dispatch.undated_shipped_count) {
+    L.push(`# NB: ${brief.dispatch.undated_shipped_count} shipped lot(s) have no dispatch date — not shown above.`);
   }
   L.push('');
 
@@ -225,15 +241,19 @@ export default async function handler(req, res) {
       });
     }
 
-    // --- Dispatches: lots marked shipped (proxy by status; production_date may
-    // predate dispatch, so we report all currently-shipped lots and flag those
-    // whose date matches). Until a true dispatch timestamp exists, this is the
-    // best available signal — surfaced honestly. ---
+    // --- Dispatches shipped ON `date` (real per-dispatch timestamp + customer).
+    // A lot becomes shipped via lots.js PATCH, which stamps dispatched_at. Legacy
+    // shipped lots with a null dispatched_at can't be placed on a day, so they're
+    // excluded here (surfaced separately as a count for honesty). ---
     const dispatched = await sql`
-      SELECT lot_code, product, supplier, weight_kg, unit, quantity, use_by
+      SELECT lot_code, product, supplier, weight_kg, unit, quantity, use_by,
+             dispatched_at, customer
       FROM lots
-      WHERE status = 'shipped'
-      ORDER BY product`;
+      WHERE status = 'shipped' AND dispatched_at::date = ${date}
+      ORDER BY dispatched_at`;
+    const undatedShipped = await sql`
+      SELECT COUNT(*)::int AS n FROM lots
+      WHERE status = 'shipped' AND dispatched_at IS NULL`;
 
     // --- Throughput totals for F40 (Throughput Register P01491) ---
     const receivedKg = sumWeights(receivals);
@@ -279,8 +299,11 @@ export default async function handler(req, res) {
           unit: d.unit,
           weight_kg: num(d.weight_kg),
           use_by: d.use_by ? isoDay(d.use_by) : null,
+          dispatched_at: d.dispatched_at ? new Date(d.dispatched_at).toISOString() : null,
+          customer: d.customer || null,
         })),
-        note: 'Dispatch is derived from lots with status=shipped (no per-dispatch timestamp yet).',
+        undated_shipped_count: undatedShipped[0] ? undatedShipped[0].n : 0,
+        note: 'Dispatches shipped on this date (lots.js stamps dispatched_at when status→shipped).',
       },
       throughput_kg: {
         received: Math.round(receivedKg * 100) / 100,
