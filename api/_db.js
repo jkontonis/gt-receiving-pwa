@@ -239,6 +239,19 @@ export async function ensureSchema() {
   await sql`CREATE INDEX IF NOT EXISTS idx_qc_errors_worker ON qc_errors(worker_code)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_qc_errors_product ON qc_errors(product)`;
 
+  // Customer complaint linkage — every complaint IS a QC error caught_by=Customer
+  // with a pointer back to the specific lot that was shipped (so we can trace
+  // worker / batch / dispatch temp / use-by from the error row), plus a small
+  // resolution journey (investigate → credit / replace / dismiss).
+  await sql`ALTER TABLE qc_errors ADD COLUMN IF NOT EXISTS lot_id INT`;
+  await sql`ALTER TABLE qc_errors ADD COLUMN IF NOT EXISTS lot_code TEXT`;
+  // resolution: 'open' | 'investigating' | 'credited' | 'replaced' | 'dismissed' | 'closed'
+  await sql`ALTER TABLE qc_errors ADD COLUMN IF NOT EXISTS resolution TEXT`;
+  await sql`ALTER TABLE qc_errors ADD COLUMN IF NOT EXISTS resolution_note TEXT`;
+  await sql`ALTER TABLE qc_errors ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_qc_errors_lot_id ON qc_errors(lot_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_qc_errors_resolution ON qc_errors(resolution) WHERE resolution IS NOT NULL`;
+
   await sql`CREATE TABLE IF NOT EXISTS process_inputs (
     id          SERIAL PRIMARY KEY,
     event_id    INT NOT NULL REFERENCES process_events(id) ON DELETE CASCADE,
