@@ -2,7 +2,8 @@
   "rewrites": [
     { "source": "/receive", "destination": "/index.html" },
     { "source": "/history", "destination": "/history.html" },
-    { "source": "/admin", "destination": "/admin.html" }
+    { "source": "/admin", "destination": "/admin.html" },
+    { "source": "/api/lookup", "destination": "/api/barcodes?action=lookup" }
   ],
   "headers": [
     {

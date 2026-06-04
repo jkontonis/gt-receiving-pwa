@@ -8,17 +8,31 @@ function requireAdminPin(req, res) {
   return true;
 }
 
-// Admin management of the learned barcode -> product map. The receive flow learns
-// mappings automatically; this lets John review, correct, or delete them.
+// Two roles in one file (to stay under Vercel Hobby's 12-function cap):
+//   - PUBLIC lookup: GET with ?barcode= (or ?action=lookup, set by the /api/lookup
+//     rewrite in vercel.json so the iOS app's existing URL keeps working).
+//   - ADMIN CRUD:    GET (list) / POST (upsert) / DELETE — all admin-PIN gated.
 export default async function handler(req, res) {
   try {
     await ensureSchema();
+
     if (req.method === 'GET') {
+      // Public lookup — triggered by a ?barcode= query (direct calls OR the
+      // /api/lookup rewrite that adds ?action=lookup).
+      if (req.query.action === 'lookup' || req.query.barcode) {
+        const barcode = (req.query.barcode || '').trim();
+        if (!barcode) return res.status(400).json({ error: 'barcode is required' });
+        const r = await sql`SELECT barcode, product, supplier, unit FROM product_barcodes WHERE barcode = ${barcode}`;
+        if (r.length === 0) return res.status(200).json({ found: false, barcode });
+        return res.status(200).json({ found: true, ...r[0] });
+      }
+      // Admin list view
       if (!requireAdminPin(req, res)) return;
       const r = await sql`SELECT barcode, product, supplier, unit, created_at
         FROM product_barcodes ORDER BY product, barcode`;
       return res.status(200).json({ barcodes: r });
     }
+
     if (req.method === 'POST') {
       if (!requireAdminPin(req, res)) return;
       const b = req.body || {};
@@ -31,6 +45,7 @@ export default async function handler(req, res) {
           unit = EXCLUDED.unit`;
       return res.status(201).json({ ok: true });
     }
+
     if (req.method === 'DELETE') {
       if (!requireAdminPin(req, res)) return;
       const barcode = (req.query && req.query.barcode) || (req.body && req.body.barcode);
@@ -39,6 +54,7 @@ export default async function handler(req, res) {
       if (r.length === 0) return res.status(404).json({ error: 'Barcode not found' });
       return res.status(200).json({ ok: true });
     }
+
     res.setHeader('Allow', 'GET, POST, DELETE');
     return res.status(405).json({ error: 'Method not allowed' });
   } catch (e) {
