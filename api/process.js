@@ -86,9 +86,11 @@ export default async function handler(req, res) {
     // (auto-classified, editable in Manage Products) — robust vs name-matching.
     // ───────────────────────────────────────────────────────────────────────
     if (eventType === 'bone_out') {
-      const ok = chickenInputs.every((l) => catOf(l) === 'whole_bird');
+      // Bone-out (deboning) takes WHOLE BIRDS (→ breast/maryland/wings/frame) OR
+      // BREAST ON BONE / barrels (→ breast fillet skin off/on only).
+      const ok = chickenInputs.every((l) => catOf(l) === 'whole_bird' || catOf(l) === 'breast_on_bone');
       if (!chickenInputs.length || !ok) {
-        return res.status(400).json({ error: 'Bone-out takes WHOLE BIRDS only. Check the input lot.' });
+        return res.status(400).json({ error: 'Bone-out takes WHOLE BIRDS or BREAST ON BONE only. Check the input lot.' });
       }
     }
     if (eventType === 'slice') {

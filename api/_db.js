@@ -78,7 +78,8 @@ export async function ensureSchema() {
   await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS units_per_carton INT`;
   // Process CATEGORY — drives event guardrails (what can be boned/sliced/crumbed)
   // reliably, instead of fragile name-matching on supplier product names.
-  //   'whole_bird' | 'breast' | 'sliced_breast' | 'batter' | 'crumb' | 'other'
+  //   'whole_bird' | 'breast_on_bone' | 'breast' | 'sliced_breast' | 'batter' | 'crumb' | 'other'
+  //   breast_on_bone = bone-in breast / barrels → bone-out → breast fillet only.
   await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS category TEXT`;
   // One-time best-effort auto-classify — only runs when there are UNcategorised
   // products, so it's skipped on every normal cold start (was 6 full-table scans
@@ -88,6 +89,11 @@ export async function ensureSchema() {
     await sql`UPDATE products SET category = 'whole_bird'
       WHERE category IS NULL AND (canonical_name ILIKE '%boning bird%' OR canonical_name ILIKE '%wbird%'
         OR canonical_name ILIKE '%whole chicken%' OR canonical_name ILIKE '%pallecon%' OR canonical_name ILIKE '%bin%')`;
+    // Breast ON BONE / barrels — bone-in breast. MUST run before the 'breast'
+    // rule below, else "BREAST ON BONE" would be caught as boneless 'breast'.
+    await sql`UPDATE products SET category = 'breast_on_bone'
+      WHERE category IS NULL AND (canonical_name ILIKE '%barrel%'
+        OR canonical_name ILIKE '%on bone%' OR canonical_name ILIKE '%on-bone%')`;
     await sql`UPDATE products SET category = 'sliced_breast'
       WHERE category IS NULL AND canonical_name ILIKE '%sliced%' AND canonical_name ILIKE '%breast%'`;
     await sql`UPDATE products SET category = 'batter'
@@ -117,6 +123,13 @@ export async function ensureSchema() {
   //    (only if it isn't referenced by any lot, to avoid breaking genealogy).
   await sql`DELETE FROM products WHERE canonical_name = 'Wings'
     AND NOT EXISTS (SELECT 1 FROM lots WHERE product = 'Wings')`;
+  // 4. Breast-on-bone / barrels were mis-tagged (the barrel as 'whole_bird' to allow
+  //    bone-out; "BREAST ON BONE" as 'breast' → wrongly routed to slicing). Re-tag
+  //    them to the dedicated 'breast_on_bone' category. Idempotent.
+  await sql`UPDATE products SET category = 'breast_on_bone'
+    WHERE kind = 'raw' AND category <> 'breast_on_bone'
+      AND (canonical_name ILIKE '%barrel%' OR canonical_name ILIKE '%on bone%'
+        OR canonical_name ILIKE '%on-bone%')`;
 
   // Every physical quantity of stock is a LOT — either RECEIVED from a supplier
   // (incoming WIP) or PRODUCED internally by a process event. Produced lots carry
