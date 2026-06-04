@@ -82,7 +82,7 @@ export default async function handler(req, res) {
           SELECT worker_code, stage, COUNT(*)::int AS n FROM qc_errors WHERE occurred_at >= ${since}
           GROUP BY worker_code, stage`;
         const recent = await sql`
-          SELECT id, created_at, occurred_at, product, stage, worker_code, error_type, caught_by, notes,
+          SELECT id, created_at, occurred_at, product, stage, worker_code, error_type, caught_by, customer, notes,
                  (photo IS NOT NULL) AS has_photo
           FROM qc_errors WHERE occurred_at >= ${since}
           ORDER BY id DESC LIMIT 25`;
