@@ -252,6 +252,107 @@ export async function ensureSchema() {
   await sql`CREATE INDEX IF NOT EXISTS idx_qc_errors_lot_id ON qc_errors(lot_id)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_qc_errors_resolution ON qc_errors(resolution) WHERE resolution IS NOT NULL`;
 
+  // Device tokens for push notifications (currently UBD warnings; later: spike
+  // alerts, cold-chain, etc.). Tokens are stored per-device, deduped on the
+  // token string. A disabled flag lets us mark stale ones without dropping the row.
+  await sql`CREATE TABLE IF NOT EXISTS devices (
+    id          SERIAL PRIMARY KEY,
+    token       TEXT UNIQUE NOT NULL,
+    platform    TEXT NOT NULL,           -- 'ios' (Android later if ever)
+    bundle_id   TEXT,
+    site_id     TEXT,                    -- which PrimeSafe site this device belongs to
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    enabled     BOOLEAN NOT NULL DEFAULT TRUE
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_devices_enabled ON devices(enabled) WHERE enabled = TRUE`;
+
+  // ---------------------------------------------------------------------------
+  // Cleaning + maintenance — daily / weekly / monthly HACCP checklists, replaces
+  // the paper sign-off sheet. cleaning_tasks is the template (e.g. "Sanitise
+  // boning tables — daily"), cleaning_signoffs is the instance (one row per
+  // performance: who, when, photo, notes).
+  // ---------------------------------------------------------------------------
+  await sql`CREATE TABLE IF NOT EXISTS cleaning_tasks (
+    id              SERIAL PRIMARY KEY,
+    name            TEXT NOT NULL,
+    area            TEXT,                       -- 'boning_room' | 'dispatch' | 'cool_rooms' | 'general'
+    frequency       TEXT NOT NULL,              -- 'daily' | 'weekly' | 'monthly'
+    requires_photo  BOOLEAN NOT NULL DEFAULT FALSE,
+    active          BOOLEAN NOT NULL DEFAULT TRUE,
+    display_order   INT NOT NULL DEFAULT 0,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    site_id         TEXT
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_cleaning_tasks_active ON cleaning_tasks(active) WHERE active = TRUE`;
+
+  await sql`CREATE TABLE IF NOT EXISTS cleaning_signoffs (
+    id           SERIAL PRIMARY KEY,
+    task_id      INT NOT NULL REFERENCES cleaning_tasks(id) ON DELETE CASCADE,
+    signed_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    signed_on    DATE NOT NULL,
+    worker_code  TEXT,
+    notes        TEXT,
+    photo        TEXT,
+    site_id      TEXT,
+    client_id    TEXT
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_cleaning_signoffs_task_date ON cleaning_signoffs(task_id, signed_on)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_cleaning_signoffs_date ON cleaning_signoffs(signed_on)`;
+
+  // ---------------------------------------------------------------------------
+  // Supplier invoice reconciliation. Admin enters (or PO parser auto-populates)
+  // the invoice header + lines; backend matches each line to the receipts on
+  // that date and flags discrepancies. Reduces admin staff manual cross-check.
+  // ---------------------------------------------------------------------------
+  await sql`CREATE TABLE IF NOT EXISTS supplier_invoices (
+    id              SERIAL PRIMARY KEY,
+    supplier        TEXT NOT NULL,
+    invoice_number  TEXT,
+    invoice_date    DATE,
+    total_amount    NUMERIC,
+    status          TEXT NOT NULL DEFAULT 'pending',   -- pending|reconciled|disputed|paid
+    notes           TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    site_id         TEXT,
+    UNIQUE (supplier, invoice_number)
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_invoices_date ON supplier_invoices(invoice_date)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_invoices_status ON supplier_invoices(status)`;
+
+  await sql`CREATE TABLE IF NOT EXISTS supplier_invoice_lines (
+    id                 SERIAL PRIMARY KEY,
+    invoice_id         INT NOT NULL REFERENCES supplier_invoices(id) ON DELETE CASCADE,
+    product            TEXT,
+    description        TEXT,           -- supplier's wording (might not match canonical)
+    quantity           NUMERIC,
+    unit               TEXT,
+    unit_price         NUMERIC,
+    line_total         NUMERIC,
+    matched_receipt_id INT,
+    match_status       TEXT,           -- 'matched'|'over_qty'|'under_qty'|'no_match'|'price_diff'
+    discrepancy_note   TEXT
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_invoice_lines_invoice ON supplier_invoice_lines(invoice_id)`;
+
+  // Seed default HACCP-common tasks once.
+  const seedCheck = await sql`SELECT COUNT(*)::int AS n FROM cleaning_tasks`;
+  if (seedCheck[0].n === 0) {
+    await sql`INSERT INTO cleaning_tasks (name, area, frequency, requires_photo, display_order) VALUES
+      ('Sanitise boning tables',            'boning_room', 'daily',   TRUE,  10),
+      ('Sanitise dispatch fridges',         'dispatch',    'daily',   TRUE,  20),
+      ('Empty + sanitise crates',           'dispatch',    'daily',   FALSE, 30),
+      ('Floors mopped (all areas)',         'general',     'daily',   FALSE, 40),
+      ('Hand-wash station refilled',        'general',     'daily',   FALSE, 50),
+      ('Knife sanitisers full strength',    'boning_room', 'daily',   FALSE, 60),
+      ('Deep clean cool rooms',             'cool_rooms',  'weekly',  TRUE,  110),
+      ('Door seals checked + cleaned',      'cool_rooms',  'weekly',  TRUE,  120),
+      ('Drain trap clean',                  'general',     'weekly',  TRUE,  130),
+      ('Fly zappers emptied',               'general',     'weekly',  FALSE, 140),
+      ('Compressor + cooler coils dust',    'cool_rooms',  'monthly', TRUE,  210),
+      ('High-touch surface deep clean',     'general',     'monthly', FALSE, 220)`;
+  }
+
   await sql`CREATE TABLE IF NOT EXISTS process_inputs (
     id          SERIAL PRIMARY KEY,
     event_id    INT NOT NULL REFERENCES process_events(id) ON DELETE CASCADE,

@@ -18,6 +18,13 @@ export default async function handler(req, res) {
       return res.status(200).json({ photo: r[0].photo });
     }
 
+    const cleanId = parseInt(req.query.cleaning || '', 10);
+    if (cleanId) {
+      const r = await sql`SELECT photo FROM cleaning_signoffs WHERE id = ${cleanId}`;
+      if (r.length === 0 || !r[0].photo) return res.status(404).json({ error: 'No photo' });
+      return res.status(200).json({ photo: r[0].photo });
+    }
+
     const lotId = parseInt(req.query.lot || '', 10);
     if (lotId) {
       const r = await sql`SELECT photo FROM lots WHERE id = ${lotId}`;

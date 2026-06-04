@@ -18,6 +18,14 @@
     {
       "path": "/api/qc?action=daily_digest",
       "schedule": "0 20 * * *"
+    },
+    {
+      "path": "/api/qc?action=ubd_check",
+      "schedule": "0 22 * * *"
+    },
+    {
+      "path": "/api/qc?action=ubd_check",
+      "schedule": "0 3 * * *"
     }
   ]
 }
