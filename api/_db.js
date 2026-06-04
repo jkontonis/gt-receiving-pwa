@@ -203,6 +203,41 @@ export async function ensureSchema() {
     status     TEXT NOT NULL DEFAULT 'Active',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`;
+  // Optional QC metadata. Added via ALTER so older deployments migrate cleanly.
+  // These power the QC error-log UI (colour-coded chips, role grouping, label SKU
+  // for ordering more sticker rolls) without breaking anything Receiving uses.
+  await sql`ALTER TABLE workers ADD COLUMN IF NOT EXISTS role TEXT`;
+  await sql`ALTER TABLE workers ADD COLUMN IF NOT EXISTS colour TEXT`;
+  await sql`ALTER TABLE workers ADD COLUMN IF NOT EXISTS worker_number INT`;
+  await sql`ALTER TABLE workers ADD COLUMN IF NOT EXISTS label_sku TEXT`;
+  await sql`ALTER TABLE workers ADD COLUMN IF NOT EXISTS active_since DATE`;
+  await sql`ALTER TABLE workers ADD COLUMN IF NOT EXISTS inactive_from DATE`;
+
+  // ---------------------------------------------------------------------------
+  // QC error log — replaces the qc-tracker-pwa standalone DB. Shares workers +
+  // products with the Receiving/traceability data so there's a single staff +
+  // SKU master across the whole G&T Chickens iOS app.
+  // ---------------------------------------------------------------------------
+  await sql`CREATE TABLE IF NOT EXISTS qc_errors (
+    id            SERIAL PRIMARY KEY,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    occurred_at   DATE NOT NULL,
+    order_number  TEXT,
+    customer      TEXT,
+    product       TEXT NOT NULL,
+    stage         TEXT NOT NULL,           -- CUT / POR / PCK / PIK / OTHER
+    worker_code   TEXT NOT NULL,           -- references workers.worker_id loosely
+    error_type    TEXT NOT NULL,           -- WC / WW / WQ / WP / M / O
+    caught_by     TEXT,
+    action_taken  TEXT,
+    notes         TEXT,
+    client_id     TEXT,
+    photo         TEXT,
+    site_id       TEXT                     -- flemington / brooklyn, from AppState.site
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_qc_errors_occurred_on ON qc_errors(occurred_at)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_qc_errors_worker ON qc_errors(worker_code)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_qc_errors_product ON qc_errors(product)`;
 
   await sql`CREATE TABLE IF NOT EXISTS process_inputs (
     id          SERIAL PRIMARY KEY,
