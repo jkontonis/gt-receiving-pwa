@@ -163,6 +163,38 @@ export default async function handler(req, res) {
       const b = req.body || {};
       const id = Number(b.id);
       if (!id) return res.status(400).json({ error: 'Missing id' });
+
+      // PARTIAL DISPATCH path: caller sent dispatch_qty or dispatch_kg.
+      // If the amount is less than what's on hand, decrement the lot and leave
+      // it available; if it would drain the lot, fall through to the normal
+      // mark-shipped path so the lot ends up status='shipped' as before.
+      const dispatchQty = b.dispatch_qty != null ? Number(b.dispatch_qty) : null;
+      const dispatchKg  = b.dispatch_kg  != null ? Number(b.dispatch_kg)  : null;
+      if (dispatchQty != null || dispatchKg != null) {
+        const cur = await sql`SELECT id, quantity, weight_kg, status FROM lots WHERE id = ${id}`;
+        if (cur.length === 0) return res.status(404).json({ error: 'Lot not found' });
+        const onHandQty = Number(cur[0].quantity || 0);
+        const onHandKg  = Number(cur[0].weight_kg || 0);
+        const partial =
+          (dispatchQty != null && dispatchQty > 0 && dispatchQty < onHandQty - 0.0001) ||
+          (dispatchKg  != null && dispatchKg  > 0 && dispatchKg  < onHandKg  - 0.0001);
+        if (partial) {
+          // Decrement only — do NOT mark shipped. The lot stays available with
+          // the leftover qty/weight. Stamp a "last dispatched to" record on the
+          // lot for the most recent customer, but keep status active.
+          await sql`UPDATE lots SET
+            quantity        = CASE WHEN ${dispatchQty != null}::bool THEN GREATEST(COALESCE(quantity,0) - ${dispatchQty}, 0) ELSE quantity END,
+            weight_kg       = CASE WHEN ${dispatchKg  != null}::bool THEN GREATEST(COALESCE(weight_kg,0) - ${dispatchKg}, 0) ELSE weight_kg END,
+            customer        = COALESCE(${b.customer || null}, customer),
+            dispatch_temp_c = COALESCE(${b.dispatch_temp_c != null ? Number(b.dispatch_temp_c) : null}, dispatch_temp_c)
+            WHERE id = ${id}`;
+          const updated = await sql`SELECT * FROM lots WHERE id = ${id}`;
+          return res.status(200).json({ lot: updated[0], partial: true });
+        }
+        // Otherwise: dispatchQty/Kg ≥ on-hand → fall through and mark shipped.
+        b.status = 'shipped';
+      }
+
       // COALESCE-merge pattern: only the keys present in the body change; a
       // missing key keeps the existing value, an explicit null clears it.
       // Dispatch convenience: marking a lot 'shipped' auto-stamps dispatched_at
