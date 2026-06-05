@@ -284,6 +284,14 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: 'Invoice has no invoice_date — set it before reconciling.' });
         }
         const lines = await sql`SELECT id, product, description, quantity, unit FROM supplier_invoice_lines WHERE invoice_id = ${id}`;
+        if (lines.length === 0) {
+          return res.status(200).json({
+            ok: true,
+            summary: { matched: 0, over: 0, under: 0, no_match: 0 },
+            has_issues: false,
+            note: 'This invoice has no line items to reconcile. Add lines first or re-scan the invoice.'
+          });
+        }
         let matched = 0, over = 0, under = 0, noMatch = 0;
         for (const ln of lines) {
           // Match by supplier + product within ±2 days
