@@ -140,16 +140,41 @@ export default async function handler(req, res) {
       RETURNING *`;
     const event = evRows[0];
 
-    // Record inputs and update their status.
+    // Record inputs and update their status / remaining weight.
     for (const inp of inputs) {
       const lotId = Number(inp.lot_id);
+      const usedKg  = numOrNull(inp.weight_kg);
+      const usedQty = numOrNull(inp.quantity);
       await sql`
         INSERT INTO process_inputs (event_id, lot_id, weight_kg, quantity)
-        VALUES (${event.id}, ${lotId}, ${numOrNull(inp.weight_kg)}, ${numOrNull(inp.quantity)})`;
-      // Default: the input is fully consumed by this process. Pass keep_open:true
-      // (e.g. taking only part of a bin) to leave it available for further use.
-      const newStatus = inp.keep_open ? 'available' : 'consumed';
-      await sql`UPDATE lots SET status = ${newStatus} WHERE id = ${lotId}`;
+        VALUES (${event.id}, ${lotId}, ${usedKg}, ${usedQty})`;
+
+      if (inp.keep_open) {
+        // PARTIAL consumption (or ingredient that spans runs) — decrement the
+        // lot's remaining weight/qty by what this run actually used, leaving
+        // the rest available. If the decrement empties the lot (epsilon ≤ 10g
+        // or 0.01 unit), auto-mark it consumed so it stops showing as WIP.
+        if (usedKg != null) {
+          await sql`UPDATE lots
+                    SET weight_kg = GREATEST(COALESCE(weight_kg, 0) - ${usedKg}, 0)
+                    WHERE id = ${lotId}`;
+          await sql`UPDATE lots SET status = 'consumed'
+                    WHERE id = ${lotId} AND COALESCE(weight_kg, 0) <= 0.01 AND status != 'consumed'`;
+        }
+        if (usedQty != null) {
+          await sql`UPDATE lots
+                    SET quantity = GREATEST(COALESCE(quantity, 0) - ${usedQty}, 0)
+                    WHERE id = ${lotId}`;
+          await sql`UPDATE lots SET status = 'consumed'
+                    WHERE id = ${lotId} AND COALESCE(quantity, 0) <= 0.01 AND status != 'consumed'`;
+        }
+        // If neither was supplied (e.g. an ingredient row with no measured kg),
+        // the lot is intentionally left fully intact — caller chose keep_open
+        // without telling us how much was used.
+      } else {
+        // FULL consumption (default).
+        await sql`UPDATE lots SET status = 'consumed' WHERE id = ${lotId}`;
+      }
     }
 
     // Create the output lots, each with a carried-down UBD.
