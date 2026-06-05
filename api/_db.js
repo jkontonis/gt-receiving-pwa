@@ -174,6 +174,29 @@ export async function ensureSchema() {
   await sql`CREATE INDEX IF NOT EXISTS idx_lots_product ON lots(product)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_lots_status ON lots(status)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_lots_supplier ON lots(supplier)`;
+
+  // ---------------------------------------------------------------------------
+  // Per-dispatch audit trail. A lot can be shipped in multiple parts to
+  // different customers — without this table, the lot's own customer column
+  // gets overwritten by each subsequent partial dispatch and you lose the
+  // history. Each row here records ONE dispatch event with qty/weight/customer/
+  // time/temp; the lot's columns are kept as a "last shipped" convenience cache.
+  await sql`CREATE TABLE IF NOT EXISTS dispatches (
+    id              SERIAL PRIMARY KEY,
+    lot_id          INT NOT NULL REFERENCES lots(id) ON DELETE CASCADE,
+    dispatched_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    quantity        NUMERIC,
+    weight_kg       NUMERIC,
+    unit            TEXT,
+    customer        TEXT,
+    dispatch_temp_c NUMERIC,
+    operator        TEXT,
+    notes           TEXT,
+    client_id       TEXT
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_dispatches_lot ON dispatches(lot_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_dispatches_at  ON dispatches(dispatched_at)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_dispatches_customer ON dispatches(customer)`;
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_lots_client_id ON lots(client_id) WHERE client_id IS NOT NULL`;
 
   // A process event consumes one or more input lots and produces one or more

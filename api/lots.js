@@ -118,7 +118,20 @@ export default async function handler(req, res) {
     // GET — list lots (?status= ?product= ?origin= ?q= ?days=) or one (?id=).
     // -----------------------------------------------------------------------
     if (req.method === 'GET') {
-      const { id, status, product, origin, q, days } = req.query;
+      const { id, status, product, origin, q, days, dispatches_for } = req.query;
+
+      // Per-lot dispatch history — used by the iOS lot detail screen so each
+      // partial ship to each customer stays visible (no overwrites).
+      if (dispatches_for) {
+        const lid = Number(dispatches_for);
+        if (!lid) return res.status(400).json({ error: 'Missing lot id' });
+        const rows = await sql`
+          SELECT id, lot_id, dispatched_at, quantity, weight_kg, unit,
+                 customer, dispatch_temp_c, operator, notes
+          FROM dispatches WHERE lot_id = ${lid}
+          ORDER BY dispatched_at DESC, id DESC`;
+        return res.status(200).json({ dispatches: rows });
+      }
 
       if (id) {
         const rows = await sql`
@@ -164,35 +177,58 @@ export default async function handler(req, res) {
       const id = Number(b.id);
       if (!id) return res.status(400).json({ error: 'Missing id' });
 
-      // PARTIAL DISPATCH path: caller sent dispatch_qty or dispatch_kg.
-      // If the amount is less than what's on hand, decrement the lot and leave
-      // it available; if it would drain the lot, fall through to the normal
-      // mark-shipped path so the lot ends up status='shipped' as before.
+      // DISPATCH (partial or full) path: caller sent dispatch_qty / dispatch_kg
+      // and/or status='shipped'. Either way we want to log ONE row in the
+      // `dispatches` audit table per event, so multiple partial shipments to
+      // different customers don't overwrite each other.
       const dispatchQty = b.dispatch_qty != null ? Number(b.dispatch_qty) : null;
       const dispatchKg  = b.dispatch_kg  != null ? Number(b.dispatch_kg)  : null;
+      const dispatchTemp = b.dispatch_temp_c != null ? Number(b.dispatch_temp_c) : null;
+      const customer = b.customer || null;
+      const operatorName = b.operator || null;
+
       if (dispatchQty != null || dispatchKg != null) {
-        const cur = await sql`SELECT id, quantity, weight_kg, status FROM lots WHERE id = ${id}`;
+        const cur = await sql`SELECT id, quantity, weight_kg, status, unit FROM lots WHERE id = ${id}`;
         if (cur.length === 0) return res.status(404).json({ error: 'Lot not found' });
         const onHandQty = Number(cur[0].quantity || 0);
         const onHandKg  = Number(cur[0].weight_kg || 0);
+        const lotUnit   = cur[0].unit;
         const partial =
           (dispatchQty != null && dispatchQty > 0 && dispatchQty < onHandQty - 0.0001) ||
           (dispatchKg  != null && dispatchKg  > 0 && dispatchKg  < onHandKg  - 0.0001);
         if (partial) {
-          // Decrement only — do NOT mark shipped. The lot stays available with
-          // the leftover qty/weight. Stamp a "last dispatched to" record on the
-          // lot for the most recent customer, but keep status active.
+          // Record this specific dispatch event (the audit trail).
+          await sql`INSERT INTO dispatches
+            (lot_id, quantity, weight_kg, unit, customer, dispatch_temp_c, operator, notes, client_id)
+            VALUES (${id}, ${dispatchQty}, ${dispatchKg}, ${lotUnit}, ${customer},
+                    ${dispatchTemp}, ${operatorName}, ${b.notes || null}, ${b.client_id || null})`;
+          // Decrement remaining qty/weight, keep status available. Do NOT touch
+          // lot.customer / lot.dispatched_at — those would otherwise mislead the
+          // dashboard into showing the latest partial customer as "the" customer.
+          // The dispatches table is the source of truth for who got what when.
           await sql`UPDATE lots SET
-            quantity        = CASE WHEN ${dispatchQty != null}::bool THEN GREATEST(COALESCE(quantity,0) - ${dispatchQty}, 0) ELSE quantity END,
-            weight_kg       = CASE WHEN ${dispatchKg  != null}::bool THEN GREATEST(COALESCE(weight_kg,0) - ${dispatchKg}, 0) ELSE weight_kg END,
-            customer        = COALESCE(${b.customer || null}, customer),
-            dispatch_temp_c = COALESCE(${b.dispatch_temp_c != null ? Number(b.dispatch_temp_c) : null}, dispatch_temp_c)
+            quantity  = CASE WHEN ${dispatchQty != null}::bool THEN GREATEST(COALESCE(quantity,0) - ${dispatchQty}, 0) ELSE quantity END,
+            weight_kg = CASE WHEN ${dispatchKg  != null}::bool THEN GREATEST(COALESCE(weight_kg,0) - ${dispatchKg}, 0) ELSE weight_kg END
             WHERE id = ${id}`;
           const updated = await sql`SELECT * FROM lots WHERE id = ${id}`;
           return res.status(200).json({ lot: updated[0], partial: true });
         }
         // Otherwise: dispatchQty/Kg ≥ on-hand → fall through and mark shipped.
         b.status = 'shipped';
+      }
+
+      // FULL dispatch path: status is being set to 'shipped'. Insert the audit
+      // row using the lot's current remaining qty/weight (the bit being shipped).
+      if (b.status === 'shipped') {
+        const cur = await sql`SELECT quantity, weight_kg, unit FROM lots WHERE id = ${id}`;
+        if (cur.length === 1) {
+          const dq = dispatchQty ?? (cur[0].quantity  != null ? Number(cur[0].quantity)  : null);
+          const dk = dispatchKg  ?? (cur[0].weight_kg != null ? Number(cur[0].weight_kg) : null);
+          await sql`INSERT INTO dispatches
+            (lot_id, quantity, weight_kg, unit, customer, dispatch_temp_c, operator, notes, client_id)
+            VALUES (${id}, ${dq}, ${dk}, ${cur[0].unit}, ${customer},
+                    ${dispatchTemp}, ${operatorName}, ${b.notes || null}, ${b.client_id || null})`;
+        }
       }
 
       // COALESCE-merge pattern: only the keys present in the body change; a
